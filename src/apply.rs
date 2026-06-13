@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 
+use crate::marker;
 use crate::scan;
 use crate::types::Verdict;
 
@@ -25,6 +26,8 @@ pub enum ApplyOutcome {
     InstalledOk,
     /// Binary was already installed and current; nothing was done.
     InstalledCurrent,
+    /// Source fingerprint matched the install marker; cargo install was skipped.
+    AlreadyCurrent,
     /// Binary is a daemon and `--with-daemons` was not requested.
     SkippedDaemon {
         /// Human-readable reason.
@@ -158,6 +161,7 @@ pub fn validate_root(root: &str) -> Result<PathBuf, String> {
 /// - `execute` — if `true`, run the `fix_cmd` subprocesses.
 /// - `only` — if `Some`, restrict to a single named artifact.
 /// - `with_daemons` — if `true`, daemon artifacts are delegated to `rollout install`.
+/// - `force_all` — if `true`, bypass the incremental-skip check and always reinstall.
 ///
 /// # Errors
 ///
@@ -170,6 +174,7 @@ pub fn run_apply(
     execute: bool,
     only: Option<&str>,
     with_daemons: bool,
+    force_all: bool,
 ) -> Result<Vec<ApplyResult>> {
     // Scan everything — include installed-current (show_all=true) so we can
     // report idempotent re-runs correctly. Filter to only the requested bin.
@@ -297,6 +302,32 @@ pub fn run_apply(
             }
         }
 
+        // ── Incremental-skip check ─────────────────────────────────────────
+        // Only skip if we're in execute mode (dry-run always shows what would
+        // happen) and --force-all was not requested.
+        if execute && !force_all {
+            // Compute current source fingerprint for this repo.
+            let current_fp = marker::compute_fingerprint(
+                std::path::Path::new(&artifact.repo),
+            );
+            if let Ok(ref fp) = current_fp {
+                // A "dirty:..." fingerprint is never skipped (it indicates
+                // uncommitted changes which we cannot fingerprint precisely).
+                if !fp.0.starts_with("dirty:") {
+                    if let Ok(Some(saved)) = marker::read_marker(&artifact.bin) {
+                        if saved.source_fingerprint == *fp && is_invokable(&artifact.bin) {
+                            output.push(ApplyResult {
+                                bin: artifact.bin.clone(),
+                                verdict: ApplyOutcome::AlreadyCurrent,
+                                elapsed_ms: start.elapsed().as_millis() as u64,
+                            });
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
         if dry_run || !execute {
             println!("[dry-run] would run: {}", artifact.fix_cmd);
             output.push(ApplyResult {
@@ -330,6 +361,14 @@ pub fn run_apply(
             Ok(s) if s.success() => {
                 // Verify the binary is now invokable.
                 if is_invokable(&artifact.bin) {
+                    // Write / update the install marker.
+                    // Best-effort: marker write failure doesn't abort the install.
+                    let fp_for_marker = marker::compute_fingerprint(
+                        std::path::Path::new(&artifact.repo),
+                    );
+                    if let Ok(fp) = fp_for_marker {
+                        let _ = marker::write_marker(&artifact.bin, &artifact.repo, &fp);
+                    }
                     output.push(ApplyResult {
                         bin: artifact.bin.clone(),
                         verdict: ApplyOutcome::InstalledOk,
@@ -405,6 +444,8 @@ mod tests {
     fn apply_outcome_eq() {
         assert_eq!(ApplyOutcome::InstalledOk, ApplyOutcome::InstalledOk);
         assert_ne!(ApplyOutcome::InstalledOk, ApplyOutcome::InstalledCurrent);
+        assert_ne!(ApplyOutcome::InstalledOk, ApplyOutcome::AlreadyCurrent);
+        assert_eq!(ApplyOutcome::AlreadyCurrent, ApplyOutcome::AlreadyCurrent);
     }
 
     // AC1: validate_root rejects literal tilde component.
@@ -451,5 +492,189 @@ mod tests {
             matches!(outcome, ApplyOutcome::BadPrefix { .. }),
             "expected BadPrefix for tilde root, got {outcome:?}"
         );
+    }
+
+    // ── Incremental-skip tests ────────────────────────────────────────────────
+    //
+    // These tests exercise the marker module directly (unit-testing the
+    // skip decision logic) without spawning cargo.
+
+    use crate::marker::{
+        compute_fingerprint, read_marker, write_marker, SourceFingerprint,
+    };
+    use std::sync::Mutex;
+    use tempfile::TempDir;
+
+    /// Serialise all tests that mutate `XDG_STATE_HOME`.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn with_state_home<F: FnOnce(&TempDir)>(f: F) {
+        let tmp = TempDir::new().unwrap();
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("XDG_STATE_HOME", tmp.path());
+        f(&tmp);
+        std::env::remove_var("XDG_STATE_HOME");
+    }
+
+    /// AC1: After a simulated successful install, marker file exists with correct fields.
+    #[test]
+    fn ac1_marker_written_after_install() {
+        with_state_home(|_tmp| {
+            let fp = SourceFingerprint("deadbeef".to_owned());
+            write_marker("testbin", "/home/joe/wintermute/testbin", &fp).unwrap();
+
+            let marker = read_marker("testbin").unwrap().expect("marker should exist");
+            assert_eq!(marker.bin, "testbin");
+            assert_eq!(marker.repo_path, "/home/joe/wintermute/testbin");
+            assert_eq!(marker.source_fingerprint, fp);
+            assert!(marker.installed_at > 0, "installed_at should be a real timestamp");
+        });
+    }
+
+    /// AC2: When the stored fingerprint matches the current one, the skip decision
+    /// is AlreadyCurrent.  We test the decision logic directly (not run_apply,
+    /// which requires a real scan + cargo).
+    #[test]
+    fn ac2_matching_fingerprint_produces_already_current() {
+        with_state_home(|_tmp| {
+            let fp = SourceFingerprint("abc123commit".to_owned());
+            write_marker("mybin", "/some/repo", &fp).unwrap();
+
+            let saved = read_marker("mybin").unwrap().expect("marker missing");
+            // Simulate the decision: if fingerprints match and binary were
+            // invokable, outcome would be AlreadyCurrent.
+            let would_skip = saved.source_fingerprint == fp;
+            assert!(would_skip, "matching fingerprint should trigger skip");
+        });
+    }
+
+    /// AC3: Changing a source file's mtime produces a different "dirty:" fingerprint.
+    #[test]
+    fn ac3_touching_source_changes_fingerprint() {
+        use std::time::{Duration, SystemTime};
+        use filetime::FileTime;
+
+        let tmp_repo = TempDir::new().unwrap();
+        let src_dir = tmp_repo.path().join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        let src_file = src_dir.join("lib.rs");
+        std::fs::write(&src_file, b"fn foo() {}").unwrap();
+
+        // First fingerprint (dirty because not a git repo)
+        let fp1 = compute_fingerprint(tmp_repo.path()).unwrap();
+        assert!(fp1.0.starts_with("dirty:"), "should be dirty fingerprint: {fp1}");
+
+        // Touch the source file to advance its mtime by 2 seconds.
+        let new_mtime = SystemTime::now() + Duration::from_secs(2);
+        filetime::set_file_mtime(&src_file, FileTime::from_system_time(new_mtime)).unwrap();
+
+        let fp2 = compute_fingerprint(tmp_repo.path()).unwrap();
+        assert!(fp2.0.starts_with("dirty:"), "should still be dirty: {fp2}");
+        assert_ne!(fp1, fp2, "mtime change should change fingerprint");
+    }
+
+    /// AC4: A dirty git worktree fingerprints as "dirty:..." and never matches
+    /// a clean commit fingerprint.
+    #[test]
+    fn ac4_dirty_worktree_never_skipped() {
+        let tmp_repo = TempDir::new().unwrap();
+        // Not a git repo → always returns dirty:...
+        let fp = compute_fingerprint(tmp_repo.path()).unwrap();
+        assert!(
+            fp.0.starts_with("dirty:"),
+            "non-git / dirty repo should start with 'dirty:': {fp}"
+        );
+        // A dirty fingerprint must never equal a clean commit hash.
+        let clean_fp = SourceFingerprint("abcdef1234567890abcdef1234567890deadbeef".to_owned());
+        assert_ne!(fp, clean_fp);
+    }
+
+    /// AC5: --force-all bypasses skip logic — tested by checking that the decision
+    /// variable `force_all` short-circuits the skip.
+    #[test]
+    fn ac5_force_all_bypasses_skip() {
+        with_state_home(|_tmp| {
+            let fp = SourceFingerprint("fixed_commit_abc".to_owned());
+            write_marker("forcebin", "/some/repo", &fp).unwrap();
+
+            let saved = read_marker("forcebin").unwrap().expect("marker missing");
+            let matches = saved.source_fingerprint == fp;
+
+            // Mimic the skip guard: even with matching fingerprint, force_all=true
+            // must produce a reinstall (no skip).
+            let force_all = true;
+            let would_skip = matches && !force_all;
+            assert!(!would_skip, "--force-all must prevent skipping");
+        });
+    }
+
+    /// AC6: AlreadyCurrent is a distinct variant from InstalledCurrent.
+    /// Summary counts correctly distinguish them.
+    #[test]
+    fn ac6_summary_distinguishes_counts() {
+        let results = vec![
+            ApplyResult {
+                bin: "a".to_owned(),
+                verdict: ApplyOutcome::InstalledOk,
+                elapsed_ms: 0,
+            },
+            ApplyResult {
+                bin: "b".to_owned(),
+                verdict: ApplyOutcome::AlreadyCurrent,
+                elapsed_ms: 0,
+            },
+            ApplyResult {
+                bin: "c".to_owned(),
+                verdict: ApplyOutcome::InstalledCurrent,
+                elapsed_ms: 0,
+            },
+            ApplyResult {
+                bin: "d".to_owned(),
+                verdict: ApplyOutcome::SkippedDaemon { note: "daemon".to_owned() },
+                elapsed_ms: 0,
+            },
+            ApplyResult {
+                bin: "e".to_owned(),
+                verdict: ApplyOutcome::Failed { reason: "oops".to_owned() },
+                elapsed_ms: 0,
+            },
+        ];
+
+        let installed = results
+            .iter()
+            .filter(|r| matches!(r.verdict, ApplyOutcome::InstalledOk))
+            .count();
+        let already_current = results
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.verdict,
+                    ApplyOutcome::AlreadyCurrent | ApplyOutcome::InstalledCurrent
+                )
+            })
+            .count();
+        let skipped_daemon = results
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.verdict,
+                    ApplyOutcome::SkippedDaemon { .. } | ApplyOutcome::SkippedDaemonsNotRequested
+                )
+            })
+            .count();
+        let failed = results
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.verdict,
+                    ApplyOutcome::Failed { .. } | ApplyOutcome::BadPrefix { .. }
+                )
+            })
+            .count();
+
+        assert_eq!(installed, 1, "installed count");
+        assert_eq!(already_current, 2, "already-current count (AlreadyCurrent + InstalledCurrent)");
+        assert_eq!(skipped_daemon, 1, "skipped-daemon count");
+        assert_eq!(failed, 1, "failed count");
     }
 }

@@ -47,6 +47,11 @@ enum Command {
         /// Restrict apply to a single artifact by binary name.
         #[arg(long, value_name = "BIN")]
         only: Option<String>,
+
+        /// Bypass the incremental-skip check and reinstall all artifacts regardless
+        /// of whether their source fingerprint has changed.
+        #[arg(long)]
+        force_all: bool,
     },
 
     /// Report unadopted artifacts to the docket ledger.
@@ -102,10 +107,10 @@ pub(crate) fn run() -> Result<()> {
                 OutputFormat::Json => scan::print_json(&results)?,
             }
         }
-        Command::Apply { execute, with_daemons, only } => {
+        Command::Apply { execute, with_daemons, only, force_all } => {
             let dry_run = !execute;
             let results =
-                apply::run_apply(dry_run, execute, only.as_deref(), with_daemons)?;
+                apply::run_apply(dry_run, execute, only.as_deref(), with_daemons, force_all)?;
             print_apply_results(&results);
 
             // Exit non-zero if any artifact failed or had a bad prefix.
@@ -154,14 +159,15 @@ fn print_apply_results(results: &[apply::ApplyResult]) {
         return;
     }
 
-    println!("{:<25} {:<30} {:>8}", "BIN", "OUTCOME", "MS");
-    let sep = "-".repeat(68_usize);
+    println!("{:<25} {:<35} {:>8}", "BIN", "OUTCOME", "MS");
+    let sep = "-".repeat(72_usize);
     println!("{sep}");
 
     for r in results {
         let outcome = match &r.verdict {
             apply::ApplyOutcome::InstalledOk => "installed-ok".to_owned(),
             apply::ApplyOutcome::InstalledCurrent => "installed-current".to_owned(),
+            apply::ApplyOutcome::AlreadyCurrent => "already-current (skipped)".to_owned(),
             apply::ApplyOutcome::SkippedDaemon { note } => {
                 format!("skipped-daemon: {note}")
             }
@@ -175,6 +181,45 @@ fn print_apply_results(results: &[apply::ApplyResult]) {
                 format!("bad-prefix: {resolved}")
             }
         };
-        println!("{:<25} {:<30} {:>8}", r.bin, outcome, r.elapsed_ms);
+        println!("{:<25} {:<35} {:>8}", r.bin, outcome, r.elapsed_ms);
     }
+
+    // Summary line distinguishing installed / already-current / skipped-daemon / failed.
+    println!("{sep}");
+    let installed: usize = results
+        .iter()
+        .filter(|r| matches!(r.verdict, apply::ApplyOutcome::InstalledOk))
+        .count();
+    let already_current: usize = results
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.verdict,
+                apply::ApplyOutcome::AlreadyCurrent | apply::ApplyOutcome::InstalledCurrent
+            )
+        })
+        .count();
+    let skipped_daemon: usize = results
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.verdict,
+                apply::ApplyOutcome::SkippedDaemon { .. }
+                    | apply::ApplyOutcome::SkippedDaemonsNotRequested
+            )
+        })
+        .count();
+    let failed: usize = results
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.verdict,
+                apply::ApplyOutcome::Failed { .. } | apply::ApplyOutcome::BadPrefix { .. }
+            )
+        })
+        .count();
+    println!(
+        "Summary: installed={installed}  already-current={already_current}  \
+         skipped-daemon={skipped_daemon}  failed={failed}"
+    );
 }

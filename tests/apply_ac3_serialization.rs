@@ -14,7 +14,7 @@ fn apply_returns_ordered_results() {
     let tmp = TempDir::new().expect("tempdir");
     env::set_var("WM_WINTERMUTE_DIR", tmp.path());
 
-    let results = run_apply(true, false, None, false)
+    let results = run_apply(true, false, None, false, false)
         .expect("run_apply should not error with empty scan");
 
     // No artifacts → results is empty or only InstalledCurrent (not-a-bin skipped)
@@ -33,7 +33,7 @@ fn apply_results_ordered_vec_type() {
     let tmp = TempDir::new().expect("tempdir");
     env::set_var("WM_WINTERMUTE_DIR", tmp.path());
 
-    let results = run_apply(true, false, None, false)
+    let results = run_apply(true, false, None, false, false)
         .expect("run_apply ok");
 
     // The type is Vec<ApplyResult>; collect bin names to assert ordering is stable.

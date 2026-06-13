@@ -11,9 +11,9 @@ fn apply_idempotent_on_current_artifacts() {
     let tmp = TempDir::new().expect("tempdir");
     env::set_var("WM_WINTERMUTE_DIR", tmp.path());
 
-    let results1 = run_apply(false, true, None, false)
+    let results1 = run_apply(false, true, None, false, false)
         .expect("first run_apply");
-    let results2 = run_apply(false, true, None, false)
+    let results2 = run_apply(false, true, None, false, false)
         .expect("second run_apply");
 
     // With empty dir both runs return same result count.

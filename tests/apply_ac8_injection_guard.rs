@@ -18,7 +18,7 @@ fn metachar_in_path_does_not_shell_expand() {
     env::set_var("WM_WINTERMUTE_DIR", tmp.path());
 
     // Even with an empty scan, verify no panics
-    let result = run_apply(true, false, None, false);
+    let result = run_apply(true, false, None, false, false);
     assert!(result.is_ok(), "run_apply should not error: {result:?}");
 }
 

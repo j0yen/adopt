@@ -70,7 +70,7 @@ fn run_apply_with_daemons_empty_env() {
     env::set_var("WM_WINTERMUTE_DIR", tmp.path());
 
     // Should not error even when with_daemons=true but rollout may be absent
-    let results = run_apply(true, false, None, true)
+    let results = run_apply(true, false, None, true, false)
         .expect("run_apply should not error");
     let _ = results; // no assertions on content — just checking no panic/error
 }
