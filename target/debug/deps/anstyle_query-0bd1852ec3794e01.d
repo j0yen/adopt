@@ -1,0 +1,6 @@
+/home/jsy/wintermute/adopt/target/debug/deps/anstyle_query-0bd1852ec3794e01.d: /home/jsy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-query-1.1.5/src/lib.rs /home/jsy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-query-1.1.5/src/windows.rs
+
+/home/jsy/wintermute/adopt/target/debug/deps/libanstyle_query-0bd1852ec3794e01.rmeta: /home/jsy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-query-1.1.5/src/lib.rs /home/jsy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-query-1.1.5/src/windows.rs
+
+/home/jsy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-query-1.1.5/src/lib.rs:
+/home/jsy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-query-1.1.5/src/windows.rs:

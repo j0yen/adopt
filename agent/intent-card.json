@@ -1,0 +1,143 @@
+{
+  "schema": "autobuilder.intent_card.v1",
+  "prd_source": "/home/jsy/wintermute/autobuilder/PRD-adopt-scan.md",
+  "root_motivation": "Automated /build ships binaries but the adoption step (cargo install → PATH) never runs and nothing verifies it. Tools sit uninstalled for days. The root gap is structural: binstale can only check a running process, so an artifact that was never installed is invisible to all existing detectors. adopt scan fills that gap with a read-only probe that answers, per shipped artifact, whether it was actually adopted and if not, what exact command to run.",
+  "user_persona": "Joe Yen on the wintermute laptop, running daily self-review and /build automation. Needs a machine-readable verdict + copy-pasteable fix per artifact so downstream tools (adopt-apply, docket-report) can consume it.",
+  "unfakeable_metric": {
+    "name": "acceptance_tests_passing_count",
+    "lower_is_better": false,
+    "harness_command": "cargo test --workspace --no-fail-fast 2>&1 | grep -c 'test .* ok'",
+    "target": 10
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "level": "MUST",
+      "description": "`adopt scan --format json` emits a JSON array; each element has at minimum `repo`, `bin`, `verdict`, `is_daemon`, and `fix_cmd` keys.",
+      "test": "tests/acceptance_ac1.rs"
+    },
+    {
+      "id": "AC2",
+      "level": "MUST",
+      "description": "A wintermute repo declaring a [[bin]] whose binary is absent from PATH/~/.local/bin/~/.cargo/bin gets verdict `not-installed` and fix_cmd `cargo install --path <repo> --root ~/.local`.",
+      "test": "tests/acceptance_ac2.rs"
+    },
+    {
+      "id": "AC3",
+      "level": "MUST",
+      "description": "A binary present on PATH whose installed mtime is newer than the repo's newest src/ commit gets verdict `installed-current`.",
+      "test": "tests/acceptance_ac3.rs"
+    },
+    {
+      "id": "AC4",
+      "level": "MUST",
+      "description": "A binary present on PATH whose installed mtime is older than the repo's newest src/ commit gets verdict `installed-stale`.",
+      "test": "tests/acceptance_ac4.rs"
+    },
+    {
+      "id": "AC5",
+      "level": "MUST",
+      "description": "A library-only repo (no [[bin]], no default-run) is reported `not-a-bin` and excluded from default output (shown only with --all).",
+      "test": "tests/acceptance_ac5.rs"
+    },
+    {
+      "id": "AC6",
+      "level": "MUST",
+      "description": "An unreadable manifest, malformed Cargo.toml, or missing repo dir is skipped without aborting (exit 0, other artifacts still reported).",
+      "test": "tests/acceptance_ac6.rs"
+    },
+    {
+      "id": "AC7",
+      "level": "MUST",
+      "description": "`adopt scan --format json | head -1` does not panic with SIGPIPE/BrokenPipe.",
+      "test": "tests/acceptance_ac7.rs"
+    },
+    {
+      "id": "AC8",
+      "level": "MUST",
+      "description": "`adopt scan --match '^wm-'` restricts output to artifacts whose bin name starts with `wm-`.",
+      "test": "tests/acceptance_ac8.rs"
+    },
+    {
+      "id": "AC9",
+      "level": "MUST",
+      "description": "When artifact is backed by a systemd user unit, is_daemon: true; when binstale absent, scan completes without error.",
+      "test": "tests/acceptance_ac9.rs"
+    },
+    {
+      "id": "AC10",
+      "level": "MUST",
+      "description": "`adopt --version` and `adopt --help` exit 0.",
+      "test": "tests/acceptance_ac10.rs"
+    }
+  ],
+  "scope": [
+    "Walk ~/wintermute/*/ for Cargo.toml declaring [[bin]]",
+    "Additive scan of shipped slugs from build manifest",
+    "Per-artifact verdict: not-installed, installed-stale, installed-current, not-a-bin",
+    "Produce copy-pasteable fix_cmd for each actionable verdict",
+    "JSON and table output formats",
+    "--all and --match filtering",
+    "SIGPIPE reset (sigpipe::reset() first line of main)",
+    "Daemon detection via systemd unit ExecStart lookup",
+    "mtime comparison with provfs xattr fallback"
+  ],
+  "non_goals": [
+    "No mutation: adopt scan is read-only, does not install anything",
+    "No network calls",
+    "No daemon/process management (that is adopt-apply's job)",
+    "No tracking of running daemon staleness (that is binstale's job)",
+    "Does not build binaries from source",
+    "Does not manage PATH or shell config"
+  ],
+  "hard_constraints": {
+    "rust_edition": "2021",
+    "target_kind": "cli",
+    "deny_unsafe": true,
+    "max_deps": null,
+    "msrv": "1.85",
+    "additional": {
+      "sigpipe_reset": "sigpipe::reset() must be the first statement in main()",
+      "no_let_chains": "no let-chains (MSRV 1.85 compatibility)"
+    }
+  },
+  "five_whys_trace": [
+    {
+      "why": 1,
+      "q": "Why does /build ship binaries that are never used?",
+      "a": "Because build = compile + commit + push, but adoption = cargo install to PATH is a separate manual step that has no enforcer."
+    },
+    {
+      "why": 2,
+      "q": "Why does no existing tool catch this?",
+      "a": "binstale operates on running process PIDs — it can't flag a binary that was never installed and therefore never runs. vigil/binstale cover stale daemons; nothing covers never-installed CLIs."
+    },
+    {
+      "why": 3,
+      "q": "Why hasn't self-review caught it?",
+      "a": "Self-review has flagged it in prose on six consecutive days, but prose notes have no machine-readable verdict and no actionable fix command wired to automation."
+    },
+    {
+      "why": 4,
+      "q": "Why does that matter?",
+      "a": "rollout — the tool whose job is adopting fleet binaries — is itself not installed (rollout absent from PATH for 9 days), meaning the fix for fleet staleness is itself the most obvious example of the problem."
+    },
+    {
+      "why": 5,
+      "q": "Why not just manually run cargo install now?",
+      "a": "The problem is structural: there are many wintermute repos and no single command shows which need adoption. The detector must exist before the fixer can be wired into automation."
+    }
+  ],
+  "ambiguities_resolved": [
+    {
+      "question": "Should adopt scan check live running processes for staleness?",
+      "resolution": "No. Running-process staleness stays binstale's job. adopt annotates is_daemon and can note binstale's verdict as context, but does not re-derive it."
+    },
+    {
+      "question": "What is the install root convention on this laptop?",
+      "resolution": "~/.local/bin (cargo install --root ~/.local). ~/.cargo/bin is also checked but not the primary fix target."
+    }
+  ],
+  "created_at": "2026-06-13T00:00:00Z",
+  "intent_slug": "adopt-scan"
+}
