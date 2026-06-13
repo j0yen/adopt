@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.0 — 2026-06-13
+
+Incremental install skip via source fingerprint — computes SHA-256 of source path and skips reinstall when fingerprint matches the installed binary's recorded hash, avoiding redundant reinstalls.
+
 ## v0.5.0 — 2026-06-13
 
 Classify stale artifacts into 6 named buckets; adopt verify reports them; docket gets per-reason slugs.
