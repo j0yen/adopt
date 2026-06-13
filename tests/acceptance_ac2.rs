@@ -6,9 +6,10 @@ use std::process::Command;
 use tempfile::TempDir;
 
 fn adopt_bin() -> std::path::PathBuf {
-    let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    p.push("target/debug/adopt");
-    p
+    let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let release = base.join("target/release/adopt");
+    if release.exists() { return release; }
+    base.join("target/debug/adopt")
 }
 
 /// Build a minimal Cargo project in a temp dir that won't be installed anywhere.

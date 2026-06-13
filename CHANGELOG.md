@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.8.0 — 2026-06-13
+
+`adopt reconcile`: one-shot pass that mints `InstallMarker` files for installed-but-unmarked binaries without rebuilding them. Uses a conservative heuristic — seeds a lineage marker only when the binary's mtime is at or after the previous commit's timestamp, ensuring genuinely-behind installs are not falsely marked current. Seeded markers carry `origin: "reconcile-seed"` (vs `"install"` for real reinstalls). Idempotent; `--dry-run` mode prints planned actions without writing. Clears the false-positive floor for all legacy installs that predate scion-verdict without requiring a full reinstall cycle.
+
 ## v0.7.0 — 2026-06-13
 
 Lineage-based freshness verdict (scion-verdict): `adopt scan` now consults the `InstallMarker` fingerprint written by `adopt apply` instead of comparing timestamps. A binary is `installed-current` iff its marker fingerprint equals the repo's current committed-HEAD hash, eliminating the chronic false-positive where binaries installed 5–33 seconds before their commit were always reported stale. Clock comparison is retained as a fallback when no marker exists. A new `freshness_basis` field on every artifact record (`"lineage"` or `"clock-fallback"`) lets callers distinguish proven from heuristic verdicts.

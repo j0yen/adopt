@@ -37,6 +37,15 @@ pub struct InstallMarker {
     pub source_fingerprint: SourceFingerprint,
     /// Unix timestamp (seconds since epoch) when the marker was written.
     pub installed_at: u64,
+    /// How this marker was created: `"install"` for a real `adopt apply`,
+    /// `"reconcile-seed"` for a clock-seeded marker from `adopt reconcile`.
+    /// Defaults to `"install"` when the field is absent (legacy markers).
+    #[serde(default = "default_origin")]
+    pub origin: String,
+}
+
+fn default_origin() -> String {
+    "install".to_owned()
 }
 
 // ── Fingerprint computation ───────────────────────────────────────────────────
@@ -183,10 +192,18 @@ pub fn read_marker(bin: &str) -> Result<Option<InstallMarker>> {
 
 /// Writes (creates or overwrites) the marker for `bin` after a successful install.
 ///
+/// `origin` records how the marker was created (`"install"` for a real reinstall,
+/// `"reconcile-seed"` for a clock-seeded marker from `adopt reconcile`).
+///
 /// # Errors
 ///
 /// Returns an error on I/O failures.
-pub fn write_marker(bin: &str, repo_path: &str, fingerprint: &SourceFingerprint) -> Result<()> {
+pub fn write_marker(
+    bin: &str,
+    repo_path: &str,
+    fingerprint: &SourceFingerprint,
+    origin: &str,
+) -> Result<()> {
     let path = marker_path(bin)?;
     // Ensure the directory exists.
     if let Some(parent) = path.parent() {
@@ -202,6 +219,7 @@ pub fn write_marker(bin: &str, repo_path: &str, fingerprint: &SourceFingerprint)
         repo_path: repo_path.to_owned(),
         source_fingerprint: fingerprint.clone(),
         installed_at: now_secs,
+        origin: origin.to_owned(),
     };
     let json = serde_json::to_string_pretty(&marker)
         .context("serialising install marker")?;
@@ -234,7 +252,7 @@ mod tests {
     fn marker_roundtrip() {
         with_state_home(|_tmp| {
             let fp = SourceFingerprint("abc123".to_owned());
-            write_marker("mybin", "/home/joe/wintermute/mybin", &fp).unwrap();
+            write_marker("mybin", "/home/joe/wintermute/mybin", &fp, "install").unwrap();
             let marker = read_marker("mybin").unwrap().expect("marker should exist");
             assert_eq!(marker.bin, "mybin");
             assert_eq!(marker.repo_path, "/home/joe/wintermute/mybin");

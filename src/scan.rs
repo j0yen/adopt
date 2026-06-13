@@ -619,7 +619,7 @@ mod tests {
         let fp = SourceFingerprint(head_hash.clone());
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
-        write_marker("ac1-testbin", &repo_dir.path().to_string_lossy(), &fp)
+        write_marker("ac1-testbin", &repo_dir.path().to_string_lossy(), &fp, "install")
             .expect("write_marker");
 
         // Fake an installed binary path (just needs to be Some).
@@ -663,7 +663,7 @@ mod tests {
         let old_fp = SourceFingerprint(format!("old-{head_hash}"));
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
-        write_marker("ac2-testbin", &repo_dir.path().to_string_lossy(), &old_fp)
+        write_marker("ac2-testbin", &repo_dir.path().to_string_lossy(), &old_fp, "install")
             .expect("write_marker");
 
         let fake_bin = state_dir.path().join("ac2-testbin");
@@ -770,7 +770,7 @@ mod tests {
         let fp = SourceFingerprint(head_hash.clone());
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
-        write_marker("ac4-testbin", &repo_dir.path().to_string_lossy(), &fp)
+        write_marker("ac4-testbin", &repo_dir.path().to_string_lossy(), &fp, "install")
             .expect("write_marker");
 
         let fake_bin = state_dir.path().join("ac4-testbin");
@@ -814,7 +814,7 @@ mod tests {
 
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
-        write_marker("ac6-testbin", &repo_dir.path().to_string_lossy(), &fp)
+        write_marker("ac6-testbin", &repo_dir.path().to_string_lossy(), &fp, "install")
             .expect("write_marker");
 
         let fake_bin = state_dir.path().join("ac6-testbin");

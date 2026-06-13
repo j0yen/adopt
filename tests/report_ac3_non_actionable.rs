@@ -7,9 +7,10 @@ use std::path::PathBuf;
 use adopt::types::{ArtifactResult, FreshnessBasis, Verdict};
 
 fn adopt_bin() -> PathBuf {
-    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    p.push("target/debug/adopt");
-    p
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let release = base.join("target/release/adopt");
+    if release.exists() { return release; }
+    base.join("target/debug/adopt")
 }
 
 fn make_artifact(bin: &str, verdict: Verdict, is_daemon: bool, repo: &str) -> ArtifactResult {

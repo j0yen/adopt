@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use adopt::apply;
 use adopt::doctor;
-use adopt::{report, scan, verify};
+use adopt::{reconcile, report, scan, verify};
 
 /// Detect shipped wintermute artifacts that never entered the live system.
 #[derive(Parser)]
@@ -84,6 +84,13 @@ enum Command {
         #[arg(long, default_value = "table")]
         format: OutputFormat,
     },
+
+    /// Mint lineage markers for installed-but-unmarked binaries (no rebuild).
+    Reconcile {
+        /// Print planned actions without writing any markers.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -146,6 +153,10 @@ pub(crate) fn run() -> Result<()> {
             if any_not_current {
                 bail!("verify: one or more artifacts are not current");
             }
+        }
+        Command::Reconcile { dry_run } => {
+            let results = reconcile::run_reconcile(dry_run)?;
+            reconcile::print_reconcile_results(&results, dry_run);
         }
     }
     Ok(())

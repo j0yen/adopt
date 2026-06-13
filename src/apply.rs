@@ -367,7 +367,7 @@ pub fn run_apply(
                         std::path::Path::new(&artifact.repo),
                     );
                     if let Ok(fp) = fp_for_marker {
-                        let _ = marker::write_marker(&artifact.bin, &artifact.repo, &fp);
+                        let _ = marker::write_marker(&artifact.bin, &artifact.repo, &fp, "install");
                     }
                     output.push(ApplyResult {
                         bin: artifact.bin.clone(),
@@ -521,7 +521,7 @@ mod tests {
     fn ac1_marker_written_after_install() {
         with_state_home(|_tmp| {
             let fp = SourceFingerprint("deadbeef".to_owned());
-            write_marker("testbin", "/home/joe/wintermute/testbin", &fp).unwrap();
+            write_marker("testbin", "/home/joe/wintermute/testbin", &fp, "install").unwrap();
 
             let marker = read_marker("testbin").unwrap().expect("marker should exist");
             assert_eq!(marker.bin, "testbin");
@@ -538,7 +538,7 @@ mod tests {
     fn ac2_matching_fingerprint_produces_already_current() {
         with_state_home(|_tmp| {
             let fp = SourceFingerprint("abc123commit".to_owned());
-            write_marker("mybin", "/some/repo", &fp).unwrap();
+            write_marker("mybin", "/some/repo", &fp, "install").unwrap();
 
             let saved = read_marker("mybin").unwrap().expect("marker missing");
             // Simulate the decision: if fingerprints match and binary were
@@ -595,7 +595,7 @@ mod tests {
     fn ac5_force_all_bypasses_skip() {
         with_state_home(|_tmp| {
             let fp = SourceFingerprint("fixed_commit_abc".to_owned());
-            write_marker("forcebin", "/some/repo", &fp).unwrap();
+            write_marker("forcebin", "/some/repo", &fp, "install").unwrap();
 
             let saved = read_marker("forcebin").unwrap().expect("marker missing");
             let matches = saved.source_fingerprint == fp;
