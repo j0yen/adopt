@@ -1,5 +1,8 @@
-//! Report AC2: each invocation carries `--key adopt:<bin>`, non-empty `--title`,
-//! `--evidence path:` and `--evidence commit:`.
+//! Report AC2: each invocation carries a per-reason `--key adopt-stale-<reason>:<bin>`,
+//! non-empty `--title`, `--evidence path:` and `--evidence commit:`.
+//!
+//! Updated for vest-verify: keys are now `adopt-stale-<reason>:<bin>` instead of
+//! the old `adopt:<bin>` so the docket can escalate each failure category separately.
 
 use adopt::report::build_docket_args;
 use adopt::types::{ArtifactResult, Verdict};
@@ -24,9 +27,13 @@ fn invocation_carries_required_flags() {
     let args = build_docket_args("run-x", &artifact);
     let args_str: Vec<&str> = args.iter().map(String::as_str).collect();
 
-    // --key adopt:<bin>
+    // --key is now per-reason: adopt-stale-<reason>:<bin>
     let key_pos = args_str.iter().position(|a| *a == "--key").expect("--key missing");
-    assert_eq!(args_str[key_pos + 1], "adopt:rollout", "--key must be adopt:<bin>");
+    let key_val = args_str[key_pos + 1];
+    assert!(
+        key_val.starts_with("adopt-stale-") && key_val.ends_with(":rollout"),
+        "--key must be adopt-stale-<reason>:rollout, got: {key_val}"
+    );
 
     // --title non-empty
     let title_pos = args_str.iter().position(|a| *a == "--title").expect("--title missing");

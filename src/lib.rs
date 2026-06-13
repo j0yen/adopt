@@ -5,3 +5,4 @@ pub mod scan;
 pub mod apply;
 pub mod report;
 pub mod doctor;
+pub mod verify;

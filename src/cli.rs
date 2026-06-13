@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use adopt::apply;
 use adopt::doctor;
-use adopt::{report, scan};
+use adopt::{report, scan, verify};
 
 /// Detect shipped wintermute artifacts that never entered the live system.
 #[derive(Parser)]
@@ -72,6 +72,13 @@ enum Command {
         #[arg(long)]
         clean: bool,
     },
+
+    /// Classify not-current artifacts into named failure buckets.
+    Verify {
+        /// Output format.
+        #[arg(long, default_value = "table")]
+        format: OutputFormat,
+    },
 }
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -123,6 +130,16 @@ pub(crate) fn run() -> Result<()> {
             let any_debris = doctor::run_doctor(clean)?;
             if any_debris {
                 bail!("adopt doctor: junk debris detected under a literal-tilde prefix");
+            }
+        }
+        Command::Verify { format } => {
+            let fmt = match format {
+                OutputFormat::Table => verify::VerifyFormat::Table,
+                OutputFormat::Json => verify::VerifyFormat::Json,
+            };
+            let any_not_current = verify::run_verify(verify::VerifyArgs { format: fmt })?;
+            if any_not_current {
+                bail!("verify: one or more artifacts are not current");
             }
         }
     }

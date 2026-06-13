@@ -11,7 +11,8 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 
 use crate::scan;
-use crate::types::{ArtifactResult, Verdict};
+use crate::types::ArtifactResult;
+use crate::verify;
 
 /// Arguments for [`run_report`].
 pub struct ReportArgs {
@@ -49,14 +50,21 @@ fn source_sha(repo: &str) -> String {
 /// No artifact-derived string is interpolated into a shell expression — each
 /// value is its own element in the returned `Vec<String>`.
 ///
+/// Uses per-reason docket slugs (`adopt-stale-<reason>`) so the docket can
+/// escalate each failure category independently.
+///
 /// Exported as `pub` for integration tests (AC2/AC4/AC5/AC8).
 #[must_use]
 pub fn build_docket_args(run_id: &str, artifact: &ArtifactResult) -> Vec<String> {
-    let key = format!("adopt:{}", artifact.bin);
+    // Classify to get per-reason slug.
+    let classified = verify::classify(artifact);
+    let slug = classified.reason.docket_slug();
+
+    let key = format!("{}:{}", slug, artifact.bin);
     let title = format!(
-        "{} built but not adopted ({})",
+        "{} not current ({})",
         artifact.bin,
-        verdict_label(&artifact.verdict),
+        classified.reason.display_name(),
     );
     let severity = if artifact.is_daemon { "error" } else { "warn" };
     let sha = source_sha(&artifact.repo);
@@ -80,14 +88,12 @@ pub fn build_docket_args(run_id: &str, artifact: &ArtifactResult) -> Vec<String>
     ]
 }
 
-/// Human-readable label for a verdict (used in the `--title` string).
-fn verdict_label(verdict: &Verdict) -> &'static str {
-    match verdict {
-        Verdict::NotInstalled => "not-installed",
-        Verdict::InstalledStale => "installed-stale",
-        Verdict::InstalledCurrent => "installed-current",
-        Verdict::NotABin => "not-a-bin",
-    }
+/// Returns the `StaleReason` docket slug for a single artifact.
+///
+/// Convenience for callers that only need the slug string.
+#[must_use]
+pub fn docket_slug_for(artifact: &ArtifactResult) -> &'static str {
+    verify::classify(artifact).reason.docket_slug()
 }
 
 /// Load artifacts from a JSON file or stdin.

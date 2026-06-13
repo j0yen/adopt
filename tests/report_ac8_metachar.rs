@@ -46,5 +46,9 @@ fn metacharacter_in_repo_preserved_literally() {
         .find(|w| w[0] == "--key")
         .map(|w| w[1].as_str())
         .expect("--key missing");
-    assert_eq!(key_val, "adopt:evilbin");
+    // Key format is now adopt-stale-<reason>:<bin> (per vest-verify).
+    assert!(
+        key_val.starts_with("adopt-stale-") && key_val.ends_with(":evilbin"),
+        "--key must be adopt-stale-<reason>:evilbin, got: {key_val}"
+    );
 }
