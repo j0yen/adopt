@@ -100,6 +100,13 @@ enum Command {
         /// Print planned actions without writing any markers.
         #[arg(long)]
         dry_run: bool,
+
+        /// Disable seeding from committed HEAD for dirty working trees.
+        /// With this flag, all dirty trees are classified as `dirty-blocked` and never seeded.
+        /// Default (without this flag): dirty trees are seeded from committed HEAD when
+        /// the installed binary is provably not behind.
+        #[arg(long)]
+        no_include_dirty: bool,
     },
 }
 
@@ -181,8 +188,9 @@ pub(crate) fn run() -> Result<()> {
                 bail!("verify: one or more artifacts are not current");
             }
         }
-        Command::Reconcile { dry_run } => {
-            let results = reconcile::run_reconcile(dry_run)?;
+        Command::Reconcile { dry_run, no_include_dirty } => {
+            let include_dirty = !no_include_dirty;
+            let results = reconcile::run_reconcile(dry_run, include_dirty)?;
             reconcile::print_reconcile_results(&results, dry_run);
         }
     }

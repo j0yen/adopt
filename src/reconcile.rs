@@ -163,7 +163,11 @@ pub enum ReconcileOutcome {
     /// Marker already existed — skipped (idempotent).
     AlreadyMarked,
     /// Repo has a dirty working tree — skipped to avoid seeding a bad fp.
+    /// (Legacy variant; retained for test compatibility — new code emits `DirtyBlocked`.)
     DirtyTree,
+    /// Dirty tree where the installed binary does not match committed HEAD
+    /// (or `--no-include-dirty` was passed).  Not `clock-fallback`; explicitly classified.
+    DirtyBlocked,
     /// Binary is not installed — skipped.
     NotInstalled,
     /// Binary mtime precedes the previous commit; install is genuinely behind — skipped.
@@ -196,11 +200,17 @@ pub struct ReconcileResult {
 ///
 /// In `dry_run` mode, prints planned actions but writes nothing.
 ///
+/// When `include_dirty` is `true` (the default), repos with dirty working
+/// trees are still considered: if the installed binary's mtime is at or after
+/// the previous commit timestamp (i.e. it was built from committed HEAD), a
+/// marker is seeded from committed HEAD.  When `include_dirty` is `false`,
+/// dirty trees are always classified as `DirtyBlocked` and never seeded.
+///
 /// # Errors
 ///
 /// Returns an error only on unrecoverable failures (e.g. cannot enumerate
 /// repos).  Per-artifact errors are captured in [`ReconcileResult::outcome`].
-pub fn run_reconcile(dry_run: bool) -> Result<Vec<ReconcileResult>> {
+pub fn run_reconcile(dry_run: bool, include_dirty: bool) -> Result<Vec<ReconcileResult>> {
     let wm_dir = wintermute_dir();
     let mut repos: Vec<PathBuf> = Vec::new();
 
@@ -227,7 +237,7 @@ pub fn run_reconcile(dry_run: bool) -> Result<Vec<ReconcileResult>> {
         };
 
         for bin in bin_names {
-            let result = reconcile_one(repo, &bin, dry_run);
+            let result = reconcile_one(repo, &bin, dry_run, include_dirty);
             results.push(result);
         }
     }
@@ -236,7 +246,7 @@ pub fn run_reconcile(dry_run: bool) -> Result<Vec<ReconcileResult>> {
 }
 
 /// Runs reconcile for a single `(repo, bin)` pair.
-fn reconcile_one(repo: &Path, bin: &str, dry_run: bool) -> ReconcileResult {
+fn reconcile_one(repo: &Path, bin: &str, dry_run: bool, include_dirty: bool) -> ReconcileResult {
     // Check if a marker already exists — idempotent skip.
     match marker::read_marker(bin) {
         Ok(Some(_)) => {
@@ -265,14 +275,7 @@ fn reconcile_one(repo: &Path, bin: &str, dry_run: bool) -> ReconcileResult {
         };
     };
 
-    // Skip dirty trees — don't seed a fingerprint that may not match HEAD.
-    if is_dirty(repo) {
-        return ReconcileResult {
-            repo: repo.display().to_string(),
-            bin: bin.to_owned(),
-            outcome: ReconcileOutcome::DirtyTree,
-        };
-    }
+    let dirty = is_dirty(repo);
 
     // Get HEAD commit hash (this is the fingerprint we'll seed).
     let Some(head_hash) = head_commit_hash(repo) else {
@@ -297,11 +300,27 @@ fn reconcile_one(repo: &Path, bin: &str, dry_run: bool) -> ReconcileResult {
     };
 
     if !provably_not_behind {
+        // The installed binary predates the previous commit regardless of dirty state.
         return ReconcileResult {
             repo: repo.display().to_string(),
             bin: bin.to_owned(),
             outcome: ReconcileOutcome::GenuinelyBehind,
         };
+    }
+
+    // Dirty-tree handling: the uncommitted changes don't affect what the installed
+    // binary was built from.  If `include_dirty` is on, we seed from committed HEAD
+    // (the binary was built from HEAD even if someone later edited the tree).
+    // If `include_dirty` is off, classify as DirtyBlocked rather than silently skip.
+    if dirty {
+        if !include_dirty {
+            return ReconcileResult {
+                repo: repo.display().to_string(),
+                bin: bin.to_owned(),
+                outcome: ReconcileOutcome::DirtyBlocked,
+            };
+        }
+        // include_dirty=true: fall through and seed from committed HEAD.
     }
 
     // Mint the marker.
@@ -357,6 +376,11 @@ pub fn print_reconcile_results(results: &[ReconcileResult], dry_run: bool) {
             }
             ReconcileOutcome::DirtyTree => {
                 println!("  skip  {bin}  (dirty working tree)  repo={repo}",
+                    bin = r.bin, repo = r.repo);
+                skipped += 1;
+            }
+            ReconcileOutcome::DirtyBlocked => {
+                println!("  dirty-blocked  {bin}  (dirty tree; HEAD does not match installed binary or --no-include-dirty)  repo={repo}",
                     bin = r.bin, repo = r.repo);
                 skipped += 1;
             }
@@ -453,7 +477,7 @@ mod tests {
             let old_path = std::env::var("PATH").unwrap_or_default();
             std::env::set_var("PATH", format!("{}:{old_path}", state_dir.path().display()));
 
-            let results = run_reconcile(false).unwrap();
+            let results = run_reconcile(false, true).unwrap();
             let r = results.iter().find(|r| r.bin == "testbin").expect("testbin result");
 
             match &r.outcome {
@@ -497,7 +521,7 @@ mod tests {
             // (We don't assert the exact pre-verdict since clock can vary.)
 
             // Reconcile seeds the marker.
-            run_reconcile(false).unwrap();
+            run_reconcile(false, true).unwrap();
 
             // Manually write the marker (reconcile may have done it, but confirm it has HEAD hash).
             let marker = read_marker("testbin2").unwrap().expect("marker");
@@ -539,7 +563,7 @@ mod tests {
             let old_path = std::env::var("PATH").unwrap_or_default();
             std::env::set_var("PATH", format!("{}:{old_path}", state_dir.path().display()));
 
-            let results = run_reconcile(false).unwrap();
+            let results = run_reconcile(false, true).unwrap();
             let r = results.iter().find(|r| r.bin == "behindbin").expect("behindbin result");
 
             assert!(
@@ -574,11 +598,11 @@ mod tests {
             std::env::set_var("PATH", format!("{}:{old_path}", state_dir.path().display()));
 
             // First run.
-            run_reconcile(false).unwrap();
+            run_reconcile(false, true).unwrap();
             let marker1 = read_marker("idembin").unwrap().expect("marker after run 1");
 
             // Second run.
-            run_reconcile(false).unwrap();
+            run_reconcile(false, true).unwrap();
             let marker2 = read_marker("idembin").unwrap().expect("marker after run 2");
 
             // Fingerprint and origin must be unchanged.
@@ -609,7 +633,7 @@ mod tests {
             let old_path = std::env::var("PATH").unwrap_or_default();
             std::env::set_var("PATH", format!("{}:{old_path}", state_dir.path().display()));
 
-            let results = run_reconcile(true).unwrap();
+            let results = run_reconcile(true, true).unwrap();
             let r = results.iter().find(|r| r.bin == "drybin").expect("drybin result");
 
             assert!(
@@ -620,6 +644,169 @@ mod tests {
             // No marker should have been written.
             let marker = read_marker("drybin").unwrap();
             assert!(marker.is_none(), "dry-run must not write a marker");
+
+            std::env::set_var("PATH", old_path);
+        });
+    }
+
+    // ── New AC: dirty-tree seeding and dirty-blocked classification ───────────
+
+    /// Make the working tree dirty (without committing).
+    fn make_dirty(dir: &Path) {
+        std::fs::write(dir.join("dirty.txt"), "uncommitted change").unwrap();
+    }
+
+    // AC-D1: dirty tree + binary matches committed HEAD → marker seeded from HEAD
+    #[test]
+    fn acd1_dirty_tree_binary_matches_head_seeds_marker() {
+        let state_dir = TempDir::new().unwrap();
+        let wm_dir = TempDir::new().unwrap();
+
+        let repo_dir = wm_dir.path().join("dirtyhead");
+        std::fs::create_dir_all(&repo_dir).unwrap();
+        let head = init_git_repo(&repo_dir, "dirtyhead");
+
+        // Install a fake binary with mtime = now (provably not behind).
+        let fake_bin = state_dir.path().join("dirtyhead");
+        std::fs::write(&fake_bin, "").unwrap();
+
+        // Make the tree dirty AFTER the commit (uncommitted edits).
+        make_dirty(&repo_dir);
+
+        with_env(&state_dir, &wm_dir, || {
+            let old_path = std::env::var("PATH").unwrap_or_default();
+            std::env::set_var("PATH", format!("{}:{old_path}", state_dir.path().display()));
+
+            // include_dirty=true → should seed from committed HEAD.
+            let results = run_reconcile(false, true).unwrap();
+            let r = results.iter().find(|r| r.bin == "dirtyhead").expect("dirtyhead result");
+
+            match &r.outcome {
+                ReconcileOutcome::Seeded { fingerprint, dry_run } => {
+                    assert_eq!(fingerprint, &head, "fingerprint must be committed HEAD hash");
+                    assert!(!dry_run);
+                }
+                other => panic!("expected Seeded, got {other:?}"),
+            }
+
+            let marker = read_marker("dirtyhead").unwrap().expect("marker should exist");
+            assert_eq!(marker.source_fingerprint.0, head, "marker fp must be committed HEAD");
+            assert_eq!(marker.origin, "reconcile-seed");
+
+            std::env::set_var("PATH", old_path);
+        });
+    }
+
+    // AC-D2: dirty tree + HEAD is ahead of installed binary → dirty-blocked, not seeded
+    #[test]
+    fn acd2_dirty_tree_head_ahead_of_binary_dirty_blocked() {
+        let state_dir = TempDir::new().unwrap();
+        let wm_dir = TempDir::new().unwrap();
+
+        let repo_dir = wm_dir.path().join("dirtyahead");
+        std::fs::create_dir_all(&repo_dir).unwrap();
+        init_git_repo(&repo_dir, "dirtyahead");
+
+        // Install the binary first (mtime = now after init commit).
+        let fake_bin = state_dir.path().join("dirtyahead");
+        std::fs::write(&fake_bin, "").unwrap();
+        // Set mtime to epoch zero so it's clearly before any commit.
+        filetime::set_file_mtime(&fake_bin, filetime::FileTime::zero()).unwrap();
+
+        // Advance HEAD so prev_commit_ts is now > binary mtime.
+        advance_head(&repo_dir);
+
+        // Make the tree dirty too.
+        make_dirty(&repo_dir);
+
+        with_env(&state_dir, &wm_dir, || {
+            let old_path = std::env::var("PATH").unwrap_or_default();
+            std::env::set_var("PATH", format!("{}:{old_path}", state_dir.path().display()));
+
+            let results = run_reconcile(false, true).unwrap();
+            let r = results.iter().find(|r| r.bin == "dirtyahead").expect("dirtyahead result");
+
+            // GenuinelyBehind takes precedence over dirty classification.
+            assert!(
+                matches!(r.outcome, ReconcileOutcome::GenuinelyBehind),
+                "expected GenuinelyBehind (HEAD is ahead of binary), got {:?}", r.outcome
+            );
+
+            // No marker.
+            assert!(read_marker("dirtyahead").unwrap().is_none(), "must not seed a marker");
+
+            std::env::set_var("PATH", old_path);
+        });
+    }
+
+    // AC-D3: --no-include-dirty → dirty-blocked for all dirty trees, no seeding
+    #[test]
+    fn acd3_no_include_dirty_blocks_seeding() {
+        let state_dir = TempDir::new().unwrap();
+        let wm_dir = TempDir::new().unwrap();
+
+        let repo_dir = wm_dir.path().join("noinclude");
+        std::fs::create_dir_all(&repo_dir).unwrap();
+        init_git_repo(&repo_dir, "noinclude");
+
+        let fake_bin = state_dir.path().join("noinclude");
+        std::fs::write(&fake_bin, "").unwrap();
+
+        // Make the tree dirty.
+        make_dirty(&repo_dir);
+
+        with_env(&state_dir, &wm_dir, || {
+            let old_path = std::env::var("PATH").unwrap_or_default();
+            std::env::set_var("PATH", format!("{}:{old_path}", state_dir.path().display()));
+
+            // include_dirty=false → must not seed.
+            let results = run_reconcile(false, false).unwrap();
+            let r = results.iter().find(|r| r.bin == "noinclude").expect("noinclude result");
+
+            assert!(
+                matches!(r.outcome, ReconcileOutcome::DirtyBlocked),
+                "expected DirtyBlocked with include_dirty=false, got {:?}", r.outcome
+            );
+
+            assert!(read_marker("noinclude").unwrap().is_none(), "no-include-dirty must not write a marker");
+
+            std::env::set_var("PATH", old_path);
+        });
+    }
+
+    // AC-D4: genuinely-behind repo unchanged — still not seeded (dirty or clean)
+    #[test]
+    fn acd4_genuinely_behind_unchanged() {
+        let state_dir = TempDir::new().unwrap();
+        let wm_dir = TempDir::new().unwrap();
+
+        let repo_dir = wm_dir.path().join("behinddirty");
+        std::fs::create_dir_all(&repo_dir).unwrap();
+        init_git_repo(&repo_dir, "behinddirty");
+
+        let fake_bin = state_dir.path().join("behinddirty");
+        std::fs::write(&fake_bin, "").unwrap();
+        filetime::set_file_mtime(&fake_bin, filetime::FileTime::zero()).unwrap();
+
+        // Advance HEAD so there's a prev commit timestamp > epoch 0.
+        advance_head(&repo_dir);
+
+        // Also make it dirty — dirty state must NOT override the GenuinelyBehind guard.
+        make_dirty(&repo_dir);
+
+        with_env(&state_dir, &wm_dir, || {
+            let old_path = std::env::var("PATH").unwrap_or_default();
+            std::env::set_var("PATH", format!("{}:{old_path}", state_dir.path().display()));
+
+            // Even with include_dirty=true, genuinely behind → not seeded.
+            let results = run_reconcile(false, true).unwrap();
+            let r = results.iter().find(|r| r.bin == "behinddirty").expect("behinddirty result");
+
+            assert!(
+                matches!(r.outcome, ReconcileOutcome::GenuinelyBehind),
+                "dirty+behind must still be GenuinelyBehind, got {:?}", r.outcome
+            );
+            assert!(read_marker("behinddirty").unwrap().is_none(), "behind binary must not get a marker");
 
             std::env::set_var("PATH", old_path);
         });
@@ -644,7 +831,7 @@ mod tests {
             std::env::set_var("PATH", format!("{}:{old_path}", state_dir.path().display()));
 
             // Reconcile seeds the marker.
-            run_reconcile(false).unwrap();
+            run_reconcile(false, true).unwrap();
             let seeded = read_marker("originbin").unwrap().expect("seeded marker");
             assert_eq!(seeded.origin, "reconcile-seed");
             assert_eq!(seeded.source_fingerprint.0, head);
