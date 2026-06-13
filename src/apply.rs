@@ -64,21 +64,15 @@ fn parse_cmd(cmd: &str) -> Vec<String> {
     cmd.split_whitespace().map(str::to_owned).collect()
 }
 
-/// Returns `true` if `bin` is callable (`bin --version` or `bin --help` exits 0).
+/// Returns `true` if `bin` is on PATH (found by `which`).
 fn is_invokable(bin: &str) -> bool {
-    for flag in &["--version", "--help"] {
-        let ok = Command::new(bin)
-            .arg(flag)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if ok {
-            return true;
-        }
-    }
-    false
+    Command::new("which")
+        .arg(bin)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 /// Returns `true` if `rollout` is on PATH.
