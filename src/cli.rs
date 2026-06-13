@@ -6,6 +6,7 @@ use anyhow::{bail, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 
 use adopt::apply;
+use adopt::doctor;
 use adopt::{report, scan};
 
 /// Detect shipped wintermute artifacts that never entered the live system.
@@ -63,6 +64,14 @@ enum Command {
         #[arg(long, value_name = "FILE")]
         from_json: Option<PathBuf>,
     },
+
+    /// Detect and optionally clean adopt-created junk under literal-tilde prefixes.
+    Doctor {
+        /// Remove junk binaries that have a verified twin in ~/.local/bin or ~/.cargo/bin.
+        /// Junk with no twin is reported but never deleted.
+        #[arg(long)]
+        clean: bool,
+    },
 }
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -92,9 +101,12 @@ pub(crate) fn run() -> Result<()> {
                 apply::run_apply(dry_run, execute, only.as_deref(), with_daemons)?;
             print_apply_results(&results);
 
-            // Exit non-zero if any artifact failed.
+            // Exit non-zero if any artifact failed or had a bad prefix.
             let any_failed = results.iter().any(|r| {
-                matches!(r.verdict, apply::ApplyOutcome::Failed { .. })
+                matches!(
+                    r.verdict,
+                    apply::ApplyOutcome::Failed { .. } | apply::ApplyOutcome::BadPrefix { .. }
+                )
             });
             if any_failed {
                 bail!("one or more installs failed");
@@ -106,6 +118,12 @@ pub(crate) fn run() -> Result<()> {
                 dry_run,
                 from_json,
             })?;
+        }
+        Command::Doctor { clean } => {
+            let any_debris = doctor::run_doctor(clean)?;
+            if any_debris {
+                bail!("adopt doctor: junk debris detected under a literal-tilde prefix");
+            }
         }
     }
     Ok(())
@@ -136,6 +154,9 @@ fn print_apply_results(results: &[apply::ApplyResult]) {
             apply::ApplyOutcome::RolloutDelegated => "rollout-delegated".to_owned(),
             apply::ApplyOutcome::Failed { reason } => format!("FAILED: {reason}"),
             apply::ApplyOutcome::NoRollout => "no-rollout".to_owned(),
+            apply::ApplyOutcome::BadPrefix { resolved } => {
+                format!("bad-prefix: {resolved}")
+            }
         };
         println!("{:<25} {:<30} {:>8}", r.bin, outcome, r.elapsed_ms);
     }
