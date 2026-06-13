@@ -114,13 +114,8 @@ pub fn run_apply(
     let scan_results = scan::run_scan(true, only)?;
 
     let mut output: Vec<ApplyResult> = Vec::new();
-    let mut failed = false;
 
     for artifact in &scan_results {
-        if failed {
-            break;
-        }
-
         let start = Instant::now();
 
         // ── Already current ────────────────────────────────────────────────
@@ -195,7 +190,7 @@ pub fn run_apply(
                         verdict: ApplyOutcome::Failed { reason },
                         elapsed_ms: start.elapsed().as_millis() as u64,
                     });
-                    failed = true;
+
                 }
                 Err(e) => {
                     output.push(ApplyResult {
@@ -205,7 +200,7 @@ pub fn run_apply(
                         },
                         elapsed_ms: start.elapsed().as_millis() as u64,
                     });
-                    failed = true;
+
                 }
             }
             continue;
@@ -245,7 +240,7 @@ pub fn run_apply(
                     },
                     elapsed_ms: start.elapsed().as_millis() as u64,
                 });
-                failed = true;
+
                 continue;
             }
         };
@@ -271,7 +266,7 @@ pub fn run_apply(
                         verdict: ApplyOutcome::Failed { reason },
                         elapsed_ms: start.elapsed().as_millis() as u64,
                     });
-                    failed = true;
+
                 }
             }
             Ok(s) => {
@@ -285,7 +280,7 @@ pub fn run_apply(
                     verdict: ApplyOutcome::Failed { reason },
                     elapsed_ms: start.elapsed().as_millis() as u64,
                 });
-                failed = true;
+
             }
             Err(e) => {
                 output.push(ApplyResult {
@@ -295,7 +290,7 @@ pub fn run_apply(
                     },
                     elapsed_ms: start.elapsed().as_millis() as u64,
                 });
-                failed = true;
+
             }
         }
     }
