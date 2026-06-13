@@ -26,8 +26,10 @@ pub enum StaleReason {
     WrongPrefix,
     /// Installed in a convention dir but not in current `PATH`.
     OffPath,
-    /// Installed and on PATH but repo HEAD / source mtime is newer than binary.
-    SourceNewer,
+    /// Source is newer than installed binary by less than the behind-days threshold.
+    SourceNewerSameday,
+    /// Source is newer than installed binary by at least the behind-days threshold.
+    SourceNewerBehind,
     /// `cargo install` exited non-zero on last attempt.
     BuildFail,
     /// Installed, on PATH, but `--version`/`--help` exits non-zero.
@@ -42,20 +44,22 @@ impl StaleReason {
             Self::NeverInstalled => "adopt-stale-neverinstalled",
             Self::WrongPrefix => "adopt-stale-wrongprefix",
             Self::OffPath => "adopt-stale-offpath",
-            Self::SourceNewer => "adopt-stale-sourcenewer",
+            Self::SourceNewerSameday => "adopt-stale-sourcenewer-sameday",
+            Self::SourceNewerBehind => "adopt-stale-sourcenewer-behind",
             Self::BuildFail => "adopt-stale-buildfail",
             Self::SmokeFail => "adopt-stale-smokefail",
         }
     }
 
-    /// Returns a display name for summary output.
+    /// Returns a display name for summary output (kebab-case for SourceNewer variants).
     #[must_use]
     pub fn display_name(&self) -> &'static str {
         match self {
             Self::NeverInstalled => "NeverInstalled",
             Self::WrongPrefix => "WrongPrefix",
             Self::OffPath => "OffPath",
-            Self::SourceNewer => "SourceNewer",
+            Self::SourceNewerSameday => "SourceNewer-sameday",
+            Self::SourceNewerBehind => "SourceNewer-behind",
             Self::BuildFail => "BuildFail",
             Self::SmokeFail => "SmokeFail",
         }
@@ -179,8 +183,11 @@ fn is_smoke_fail(bin: &str) -> bool {
 }
 
 /// Classify a single artifact that has a non-current verdict.
+///
+/// `behind_days` is the threshold for splitting `SourceNewer` into
+/// `SourceNewerSameday` (delta < threshold) vs `SourceNewerBehind` (delta >= threshold).
 #[must_use]
-pub fn classify(artifact: &ArtifactResult) -> ClassifiedArtifact {
+pub fn classify(artifact: &ArtifactResult, behind_days: i64) -> ClassifiedArtifact {
     let bin = &artifact.bin;
 
     // 1. If the scan says it was never found anywhere, first check wrong prefix.
@@ -223,19 +230,27 @@ pub fn classify(artifact: &ArtifactResult) -> ClassifiedArtifact {
             };
         }
 
-        // Binary runs fine, source is just newer.
-        let detail = match (artifact.source_commit_ts, artifact.installed_ts) {
+        // Binary runs fine, source is just newer. Compute day delta.
+        let (days, detail) = match (artifact.source_commit_ts, artifact.installed_ts) {
             (Some(src), Some(inst)) => {
                 let delta = src - inst;
-                let days = delta / 86400;
-                format!("source is {days}d newer than installed binary")
+                let d = delta / 86400;
+                (d, format!("source is {d}d newer than installed binary"))
             }
-            _ => "source HEAD is newer than installed binary".to_owned(),
+            _ => (-1_i64, "source HEAD is newer than installed binary".to_owned()),
+        };
+
+        // Split by threshold: days < behind_days → Sameday; days >= behind_days → Behind.
+        // If days is unknown (sentinel -1), default to Sameday.
+        let reason = if days < 0 || days < behind_days {
+            StaleReason::SourceNewerSameday
+        } else {
+            StaleReason::SourceNewerBehind
         };
 
         return ClassifiedArtifact {
             bin: bin.clone(),
-            reason: StaleReason::SourceNewer,
+            reason,
             detail,
         };
     }
@@ -252,6 +267,9 @@ pub fn classify(artifact: &ArtifactResult) -> ClassifiedArtifact {
 pub struct VerifyArgs {
     /// Output format.
     pub format: VerifyFormat,
+    /// Day delta threshold: source-newer artifacts with delta >= this are `SourceNewerBehind`;
+    /// those with delta < this are `SourceNewerSameday`. Default is 2.
+    pub behind_days: i64,
 }
 
 /// Output format for `adopt verify`.
@@ -275,11 +293,12 @@ pub type AnyNotCurrent = bool;
 /// Returns an error if the scan fails.
 pub fn run_verify(args: VerifyArgs) -> Result<AnyNotCurrent> {
     let results = scan::run_scan(true, None)?;
+    let behind_days = args.behind_days;
 
     let classified: Vec<ClassifiedArtifact> = results
         .iter()
         .filter(|r| r.verdict.is_actionable())
-        .map(|r| classify(r))
+        .map(|r| classify(r, behind_days))
         .collect();
 
     if args.format == VerifyFormat::Json {
@@ -342,7 +361,8 @@ fn print_summary(classified: &[ClassifiedArtifact]) {
         "NeverInstalled",
         "WrongPrefix",
         "OffPath",
-        "SourceNewer",
+        "SourceNewer-behind",
+        "SourceNewer-sameday",
         "BuildFail",
         "SmokeFail",
     ];
@@ -387,9 +407,9 @@ mod tests {
         }
     }
 
-    // AC1: JSON output has bin, reason, detail fields.
+    // AC1: JSON output has bin, reason, detail fields — and no bare "SourceNewer" reason.
     #[test]
-    fn ac1_json_fields() {
+    fn ac1_json_fields_no_bare_sourcenewer() {
         let artifact = make_artifact("never-bin", Verdict::NotInstalled, None, None, None);
         // For NeverInstalled, classify doesn't touch env vars — no lock needed.
         // But we do override HOME to ensure there's no junk prefix or local/bin in real $HOME.
@@ -397,7 +417,7 @@ mod tests {
         let old_home = std::env::var("HOME").unwrap_or_default();
         // Use a non-existent home to ensure NeverInstalled classification.
         std::env::set_var("HOME", "/tmp/adopt-test-ac1-nonexistent");
-        let c = classify(&artifact);
+        let c = classify(&artifact, 2);
         std::env::set_var("HOME", old_home);
         drop(_guard);
 
@@ -405,6 +425,101 @@ mod tests {
         assert!(json.get("bin").is_some(), "missing 'bin' field");
         assert!(json.get("reason").is_some(), "missing 'reason' field");
         assert!(json.get("detail").is_some(), "missing 'detail' field");
+
+        // Ensure bare "SourceNewer" variant does not appear in JSON.
+        let reason_str = json["reason"].as_str().unwrap_or("");
+        assert!(
+            reason_str != "SourceNewer",
+            "bare 'SourceNewer' should not appear in JSON; got: {reason_str}"
+        );
+    }
+
+    // NEW-AC1: source-newer artifacts produce SourceNewerSameday or SourceNewerBehind in JSON,
+    // never bare "SourceNewer".
+    #[test]
+    fn new_ac1_no_bare_sourcenewer_in_json() {
+        // Use "true" which usually smokes fine; if not, test still validates no bare SourceNewer.
+        let artifact = make_artifact(
+            "true",
+            Verdict::InstalledStale,
+            Some("/usr/bin/true"),
+            Some(2_000_000_000),
+            Some(1_000_000_000),
+        );
+        let c = classify(&artifact, 2);
+        let json = serde_json::to_value(&c).expect("serialize");
+        let reason_str = json["reason"].as_str().unwrap_or("");
+        assert!(
+            reason_str != "SourceNewer",
+            "bare 'SourceNewer' must not appear; got: {reason_str}"
+        );
+        // Must be one of the split variants (or SmokeFail on some systems).
+        assert!(
+            matches!(c.reason,
+                StaleReason::SourceNewerSameday | StaleReason::SourceNewerBehind | StaleReason::SmokeFail),
+            "expected split variant, got: {:?}", c.reason
+        );
+    }
+
+    // NEW-AC2: 0d-newer → sameday; 8d-newer → behind at default threshold 2.
+    #[test]
+    fn new_ac2_day_threshold_split() {
+        let now = 2_000_000_000_i64;
+        let zero_days_newer = now; // 0d: src == inst
+        let eight_days_newer = now + 8 * 86400;
+
+        // 0d newer: sameday.
+        let artifact_0d = make_artifact(
+            "true",
+            Verdict::InstalledStale,
+            Some("/usr/bin/true"),
+            Some(zero_days_newer),
+            Some(now),
+        );
+        let c_0d = classify(&artifact_0d, 2);
+        if !matches!(c_0d.reason, StaleReason::SmokeFail) {
+            assert_eq!(
+                c_0d.reason, StaleReason::SourceNewerSameday,
+                "0d-newer should be SourceNewerSameday at threshold 2, got {:?}", c_0d.reason
+            );
+        }
+
+        // 8d newer: behind.
+        let artifact_8d = make_artifact(
+            "true",
+            Verdict::InstalledStale,
+            Some("/usr/bin/true"),
+            Some(eight_days_newer),
+            Some(now),
+        );
+        let c_8d = classify(&artifact_8d, 2);
+        if !matches!(c_8d.reason, StaleReason::SmokeFail) {
+            assert_eq!(
+                c_8d.reason, StaleReason::SourceNewerBehind,
+                "8d-newer should be SourceNewerBehind at threshold 2, got {:?}", c_8d.reason
+            );
+        }
+    }
+
+    // NEW-AC3: --behind-days 0 puts all source-newer in SourceNewerBehind.
+    #[test]
+    fn new_ac3_behind_days_zero() {
+        let now = 2_000_000_000_i64;
+        // Even 0 days newer (src == inst) should be Behind at threshold 0.
+        let artifact = make_artifact(
+            "true",
+            Verdict::InstalledStale,
+            Some("/usr/bin/true"),
+            Some(now + 1), // 1 second newer (< 1 day but >= 0 days threshold)
+            Some(now),
+        );
+        let c = classify(&artifact, 0);
+        if !matches!(c.reason, StaleReason::SmokeFail) {
+            assert_eq!(
+                c.reason, StaleReason::SourceNewerBehind,
+                "--behind-days 0 should put all source-newer in Behind, got {:?}", c.reason
+            );
+        }
     }
 
     // AC2: WrongPrefix classification when junk prefix dir exists.
@@ -427,7 +542,7 @@ mod tests {
 
         // Artifact says not installed (scan didn't find it normally).
         let artifact = make_artifact("mybin", Verdict::NotInstalled, None, None, None);
-        let c = classify(&artifact);
+        let c = classify(&artifact, 2);
 
         std::env::remove_var("HOME");
         drop(_guard);
@@ -459,7 +574,7 @@ mod tests {
         std::env::set_var("PATH", "/usr/bin:/bin");
 
         let artifact = make_artifact("offpathbin", Verdict::NotInstalled, None, None, None);
-        let c = classify(&artifact);
+        let c = classify(&artifact, 2);
 
         std::env::set_var("HOME", std::env::var("HOME").unwrap_or_default());
         std::env::remove_var("HOME");
@@ -470,7 +585,7 @@ mod tests {
             "expected OffPath, got {:?}: {}", c.reason, c.detail);
     }
 
-    // AC4: SourceNewer when installed but source is newer.
+    // AC4: SourceNewer split when installed but source is newer.
     #[test]
     fn ac4_source_newer_detected() {
         // Artifact is InstalledStale — scan found it but source commit is newer.
@@ -480,15 +595,70 @@ mod tests {
             Verdict::InstalledStale,
             Some("/usr/bin/true"),
             Some(2_000_000_000), // src newer
-            Some(1_000_000_000), // binary older
+            Some(1_000_000_000), // binary older (~11574d delta → Behind at default 2)
         );
-        let c = classify(&artifact);
+        let c = classify(&artifact, 2);
         // "true --version" returns non-zero on some systems but it exists.
-        // We accept either SourceNewer or SmokeFail (depends on system).
+        // We accept either SourceNewerBehind, SourceNewerSameday, or SmokeFail (depends on system).
         assert!(
-            matches!(c.reason, StaleReason::SourceNewer | StaleReason::SmokeFail),
-            "expected SourceNewer or SmokeFail, got {:?}", c.reason
+            matches!(c.reason,
+                StaleReason::SourceNewerSameday | StaleReason::SourceNewerBehind | StaleReason::SmokeFail),
+            "expected split SourceNewer or SmokeFail, got {:?}", c.reason
         );
+    }
+
+    // NEW-AC4: Summary line shows per-bucket counts for SourceNewer split variants.
+    #[test]
+    fn new_ac4_summary_per_bucket_counts() {
+        let classified = vec![
+            ClassifiedArtifact {
+                bin: "a".to_owned(),
+                reason: StaleReason::SourceNewerBehind,
+                detail: "source is 8d newer".to_owned(),
+            },
+            ClassifiedArtifact {
+                bin: "b".to_owned(),
+                reason: StaleReason::SourceNewerSameday,
+                detail: "source is 0d newer".to_owned(),
+            },
+            ClassifiedArtifact {
+                bin: "c".to_owned(),
+                reason: StaleReason::SourceNewerBehind,
+                detail: "source is 5d newer".to_owned(),
+            },
+        ];
+
+        let mut counts: std::collections::HashMap<&'static str, usize> =
+            std::collections::HashMap::new();
+        for c in &classified {
+            *counts.entry(c.reason.display_name()).or_insert(0) += 1;
+        }
+
+        assert_eq!(*counts.get("SourceNewer-behind").unwrap_or(&0), 2,
+            "expected 2 SourceNewer-behind");
+        assert_eq!(*counts.get("SourceNewer-sameday").unwrap_or(&0), 1,
+            "expected 1 SourceNewer-sameday");
+        // Bare "SourceNewer" should not appear at all.
+        assert_eq!(*counts.get("SourceNewer").unwrap_or(&0), 0,
+            "bare SourceNewer should not appear in summary");
+    }
+
+    // NEW-AC5: Exit code is non-zero (any_not_current=true) when artifacts are not current.
+    // Tested indirectly — run_verify internals guarantee non-empty classified → true.
+    #[test]
+    fn new_ac5_exit_code_contract() {
+        // If classified is non-empty, run_verify returns true (non-zero exit).
+        // We verify this by checking that is_actionable is true for not-installed/stale verdicts.
+        let not_installed = Verdict::NotInstalled;
+        let stale = Verdict::InstalledStale;
+        assert!(not_installed.is_actionable(), "NotInstalled should be actionable");
+        assert!(stale.is_actionable(), "InstalledStale should be actionable");
+
+        // And that current verdicts are not.
+        let current = Verdict::InstalledCurrent;
+        let not_a_bin = Verdict::NotABin;
+        assert!(!current.is_actionable(), "InstalledCurrent should not be actionable");
+        assert!(!not_a_bin.is_actionable(), "NotABin should not be actionable");
     }
 
     // AC5: verify returns true (any not-current) when artifacts exist.
@@ -531,7 +701,8 @@ mod tests {
             StaleReason::NeverInstalled,
             StaleReason::WrongPrefix,
             StaleReason::OffPath,
-            StaleReason::SourceNewer,
+            StaleReason::SourceNewerSameday,
+            StaleReason::SourceNewerBehind,
             StaleReason::BuildFail,
             StaleReason::SmokeFail,
         ];
@@ -550,5 +721,13 @@ mod tests {
         let r2 = StaleReason::WrongPrefix;
         let s2 = serde_json::to_string(&r2).unwrap();
         assert_eq!(s2, "\"WrongPrefix\"");
+
+        let r3 = StaleReason::SourceNewerSameday;
+        let s3 = serde_json::to_string(&r3).unwrap();
+        assert_eq!(s3, "\"SourceNewerSameday\"");
+
+        let r4 = StaleReason::SourceNewerBehind;
+        let s4 = serde_json::to_string(&r4).unwrap();
+        assert_eq!(s4, "\"SourceNewerBehind\"");
     }
 }

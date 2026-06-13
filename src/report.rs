@@ -101,7 +101,7 @@ fn source_sha(repo: &str) -> String {
 #[must_use]
 pub fn build_docket_args(run_id: &str, artifact: &ArtifactResult) -> Vec<String> {
     // Classify to get per-reason slug.
-    let classified = verify::classify(artifact);
+    let classified = verify::classify(artifact, 2);
     let slug = classified.reason.docket_slug();
 
     let key = format!("{}:{}", slug, artifact.bin);
@@ -152,7 +152,7 @@ pub fn build_resolve_args(run_id: &str, slug: &str) -> Vec<String> {
 /// Convenience for callers that only need the slug string.
 #[must_use]
 pub fn docket_slug_for(artifact: &ArtifactResult) -> &'static str {
-    verify::classify(artifact).reason.docket_slug()
+    verify::classify(artifact, 2).reason.docket_slug()
 }
 
 /// Load artifacts from a JSON file or stdin.

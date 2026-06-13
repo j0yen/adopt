@@ -88,6 +88,11 @@ enum Command {
         /// Output format.
         #[arg(long, default_value = "table")]
         format: OutputFormat,
+
+        /// Day threshold for splitting SourceNewer: artifacts with delta >= N days are
+        /// classified as SourceNewer-behind; those below are SourceNewer-sameday.
+        #[arg(long, default_value = "2", value_name = "N")]
+        behind_days: i64,
     },
 
     /// Mint lineage markers for installed-but-unmarked binaries (no rebuild).
@@ -163,12 +168,15 @@ pub(crate) fn run() -> Result<()> {
                 bail!("adopt doctor: junk debris detected under a literal-tilde prefix");
             }
         }
-        Command::Verify { format } => {
+        Command::Verify { format, behind_days } => {
             let fmt = match format {
                 OutputFormat::Table => verify::VerifyFormat::Table,
                 OutputFormat::Json => verify::VerifyFormat::Json,
             };
-            let any_not_current = verify::run_verify(verify::VerifyArgs { format: fmt })?;
+            let any_not_current = verify::run_verify(verify::VerifyArgs {
+                format: fmt,
+                behind_days,
+            })?;
             if any_not_current {
                 bail!("verify: one or more artifacts are not current");
             }
