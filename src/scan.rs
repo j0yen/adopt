@@ -305,7 +305,7 @@ fn derive_fix_cmd(verdict: &Verdict, is_daemon: bool, repo: &Path) -> String {
     if is_daemon {
         format!("rollout install {}", repo.display())
     } else {
-        format!("cargo install --path {} --root {}", repo.display(), home_dir().join(".local").display())
+        format!("cargo install --force --path {} --root {}", repo.display(), home_dir().join(".local").display())
     }
 }
 
