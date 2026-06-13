@@ -1,7 +1,7 @@
 //! Report AC5: same key/run pair produces identical args (docket handles dedupe).
 
 use adopt::report::build_docket_args;
-use adopt::types::{ArtifactResult, Verdict};
+use adopt::types::{ArtifactResult, FreshnessBasis, Verdict};
 
 fn make_artifact(bin: &str, verdict: Verdict, is_daemon: bool, repo: &str) -> ArtifactResult {
     ArtifactResult {
@@ -14,6 +14,7 @@ fn make_artifact(bin: &str, verdict: Verdict, is_daemon: bool, repo: &str) -> Ar
         installed_ts: None,
         fix_cmd: String::new(),
         age_vs_head: None,
+        freshness_basis: FreshnessBasis::ClockFallback,
     }
 }
 

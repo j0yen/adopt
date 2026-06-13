@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.7.0 — 2026-06-13
+
+Lineage-based freshness verdict (scion-verdict): `adopt scan` now consults the `InstallMarker` fingerprint written by `adopt apply` instead of comparing timestamps. A binary is `installed-current` iff its marker fingerprint equals the repo's current committed-HEAD hash, eliminating the chronic false-positive where binaries installed 5–33 seconds before their commit were always reported stale. Clock comparison is retained as a fallback when no marker exists. A new `freshness_basis` field on every artifact record (`"lineage"` or `"clock-fallback"`) lets callers distinguish proven from heuristic verdicts.
+
 ## v0.6.0 — 2026-06-13
 
 Incremental install skip via source fingerprint — computes SHA-256 of source path and skips reinstall when fingerprint matches the installed binary's recorded hash, avoiding redundant reinstalls.

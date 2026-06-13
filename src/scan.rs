@@ -8,7 +8,8 @@ use anyhow::{Context, Result};
 use regex::Regex;
 use serde_json::Value;
 
-use crate::types::{ArtifactResult, Verdict};
+use crate::marker;
+use crate::types::{ArtifactResult, FreshnessBasis, Verdict};
 
 // ── Path helpers ──────────────────────────────────────────────────────────────
 
@@ -280,22 +281,74 @@ fn manifest_repo_paths() -> Vec<PathBuf> {
 
 // ── Verdict derivation (split out to keep run_scan under line limit) ──────────
 
-const fn derive_verdict(
+/// Derives the freshness verdict for a single artifact.
+///
+/// Priority:
+/// 1. If an [`InstallMarker`](crate::marker::InstallMarker) exists for `bin`,
+///    compare its fingerprint to the current committed-HEAD fingerprint of
+///    `repo`. Equal → `InstalledCurrent (Lineage)`, differs →
+///    `InstalledStale (Lineage)`.  A dirty working tree is handled
+///    correctly: `compute_fingerprint` returns `dirty:…` for dirty trees, so
+///    we compare the marker against the *committed* HEAD directly via
+///    `git rev-parse HEAD`, ensuring a binary built from the last commit is
+///    not falsely reported stale while the tree is dirty.
+/// 2. If no marker is present (legacy or unmarked install), fall back to the
+///    original timestamp comparison (`installed_ts < src_commit_ts`).
+///
+/// Returns `(Verdict, FreshnessBasis)`.
+fn derive_verdict(
     installed: Option<&PathBuf>,
     installed_ts: Option<i64>,
     src_ts: Option<i64>,
-) -> Verdict {
+    bin: &str,
+    repo: &Path,
+) -> (Verdict, FreshnessBasis) {
     if installed.is_none() {
-        return Verdict::NotInstalled;
+        // Not installed — basis is not meaningful, use clock-fallback.
+        return (Verdict::NotInstalled, FreshnessBasis::ClockFallback);
     }
-    if let (Some(its), Some(sts)) = (installed_ts, src_ts) {
-        if its < sts {
-            return Verdict::InstalledStale;
+
+    // Attempt lineage-based verdict via InstallMarker.
+    if let Ok(Some(marker_data)) = marker::read_marker(bin) {
+        // Compute the committed-HEAD fingerprint for this repo.
+        // We call git rev-parse HEAD directly so that a dirty working tree
+        // (which would produce "dirty:…" from compute_fingerprint) does not
+        // falsely report stale when the binary matches the last commit.
+        let committed_head = std::process::Command::new("git")
+            .args(["-C", &repo.to_string_lossy(), "rev-parse", "HEAD"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| {
+                let s = String::from_utf8(o.stdout).ok()?;
+                let trimmed = s.trim().to_owned();
+                if trimmed.is_empty() { None } else { Some(trimmed) }
+            });
+
+        if let Some(head_hash) = committed_head {
+            let marker_fp = &marker_data.source_fingerprint.0;
+            let verdict = if marker_fp == &head_hash {
+                Verdict::InstalledCurrent
+            } else {
+                Verdict::InstalledStale
+            };
+            return (verdict, FreshnessBasis::Lineage);
         }
-        return Verdict::InstalledCurrent;
+        // git unavailable or not a repo — fall through to clock.
     }
-    // Can't compare timestamps → assume current to avoid false stale alarms.
-    Verdict::InstalledCurrent
+
+    // Clock fallback: original behavior.
+    let verdict = if let (Some(its), Some(sts)) = (installed_ts, src_ts) {
+        if its < sts {
+            Verdict::InstalledStale
+        } else {
+            Verdict::InstalledCurrent
+        }
+    } else {
+        // Can't compare timestamps → assume current to avoid false stale alarms.
+        Verdict::InstalledCurrent
+    };
+    (verdict, FreshnessBasis::ClockFallback)
 }
 
 fn derive_fix_cmd(verdict: &Verdict, is_daemon: bool, repo: &Path) -> String {
@@ -375,6 +428,7 @@ pub fn run_scan(show_all: bool, match_re: Option<&str>) -> Result<Vec<ArtifactRe
                     installed_ts: None,
                     fix_cmd: String::new(),
                     age_vs_head: None,
+                    freshness_basis: FreshnessBasis::ClockFallback,
                 });
             }
             continue;
@@ -394,7 +448,8 @@ pub fn run_scan(show_all: bool, match_re: Option<&str>) -> Result<Vec<ArtifactRe
             let installed_ts = installed.as_ref().and_then(|p| mtime_ts(p));
             let is_daemon = is_daemon_bin(&bin);
 
-            let verdict = derive_verdict(installed.as_ref(), installed_ts, src_ts);
+            let (verdict, freshness_basis) =
+                derive_verdict(installed.as_ref(), installed_ts, src_ts, &bin, &repo);
 
             // Skip installed-current / not-a-bin unless --all.
             if !show_all && !verdict.is_actionable() {
@@ -414,6 +469,7 @@ pub fn run_scan(show_all: bool, match_re: Option<&str>) -> Result<Vec<ArtifactRe
                 installed_ts,
                 fix_cmd,
                 age_vs_head,
+                freshness_basis,
             });
         }
     }
@@ -467,8 +523,17 @@ pub fn print_json(results: &[ArtifactResult]) -> Result<()> {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::marker::{write_marker, SourceFingerprint};
+    use std::process::Command;
+    use std::sync::Mutex;
+
+    /// Global mutex to serialise tests that mutate env vars.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    // ── format_age ────────────────────────────────────────────────────────────
 
     #[test]
     fn format_age_current() {
@@ -490,5 +555,284 @@ mod tests {
         let src = 1_000_000;
         let inst = src - 5 * 3600;
         assert_eq!(format_age(inst, src), "5h stale");
+    }
+
+    // ── Helpers for lineage tests ─────────────────────────────────────────────
+
+    /// Initialise a minimal git repo in `dir` and return the HEAD commit hash.
+    fn init_git_repo(dir: &std::path::Path) -> String {
+        // Init
+        Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(dir)
+            .output()
+            .expect("git init");
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(dir)
+            .output()
+            .expect("git config email");
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(dir)
+            .output()
+            .expect("git config name");
+
+        // Add a file and commit so HEAD exists.
+        std::fs::write(dir.join("README"), "hello").expect("write README");
+        Command::new("git")
+            .args(["add", "README"])
+            .current_dir(dir)
+            .output()
+            .expect("git add");
+        Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(dir)
+            .output()
+            .expect("git commit");
+
+        // Return HEAD hash.
+        let out = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(dir)
+            .output()
+            .expect("git rev-parse HEAD");
+        String::from_utf8(out.stdout).expect("utf8").trim().to_owned()
+    }
+
+    // ── AC1: marker fingerprint matches HEAD → InstalledCurrent (Lineage) ────
+
+    /// AC1: Even when `installed_ts < src_commit_ts` (clock says stale),
+    /// a marker whose fingerprint equals the committed HEAD returns
+    /// `InstalledCurrent` with basis `Lineage`.
+    #[test]
+    fn ac1_lineage_current_overrides_clock_stale() {
+        use tempfile::TempDir;
+
+        let repo_dir = TempDir::new().expect("repo dir");
+        let state_dir = TempDir::new().expect("state dir");
+
+        // Set up git repo and get HEAD hash.
+        let head_hash = init_git_repo(repo_dir.path());
+
+        // Write a marker whose fingerprint IS the HEAD hash.
+        let fp = SourceFingerprint(head_hash.clone());
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("XDG_STATE_HOME", state_dir.path());
+        write_marker("ac1-testbin", &repo_dir.path().to_string_lossy(), &fp)
+            .expect("write_marker");
+
+        // Fake an installed binary path (just needs to be Some).
+        let fake_bin = state_dir.path().join("ac1-testbin");
+        std::fs::write(&fake_bin, "").expect("write fake bin");
+
+        // installed_ts is LESS than src_ts (clock says stale).
+        let installed_ts: Option<i64> = Some(1_000_000);
+        let src_ts: Option<i64> = Some(2_000_000);
+
+        let (verdict, basis) = derive_verdict(
+            Some(&fake_bin),
+            installed_ts,
+            src_ts,
+            "ac1-testbin",
+            repo_dir.path(),
+        );
+
+        std::env::remove_var("XDG_STATE_HOME");
+        drop(_guard);
+
+        assert_eq!(verdict, Verdict::InstalledCurrent, "expected InstalledCurrent by lineage");
+        assert_eq!(basis, crate::types::FreshnessBasis::Lineage, "expected Lineage basis");
+    }
+
+    // ── AC2: marker fingerprint differs from HEAD → InstalledStale (Lineage) ─
+
+    /// AC2: A marker with a stale fingerprint (an old commit hash) yields
+    /// `InstalledStale` with basis `Lineage`, proving genuine behind.
+    #[test]
+    fn ac2_lineage_stale_when_fingerprint_differs() {
+        use tempfile::TempDir;
+
+        let repo_dir = TempDir::new().expect("repo dir");
+        let state_dir = TempDir::new().expect("state dir");
+
+        // Set up git repo and get HEAD hash.
+        let head_hash = init_git_repo(repo_dir.path());
+
+        // Write a marker with a DIFFERENT (old) fingerprint.
+        let old_fp = SourceFingerprint(format!("old-{head_hash}"));
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("XDG_STATE_HOME", state_dir.path());
+        write_marker("ac2-testbin", &repo_dir.path().to_string_lossy(), &old_fp)
+            .expect("write_marker");
+
+        let fake_bin = state_dir.path().join("ac2-testbin");
+        std::fs::write(&fake_bin, "").expect("write fake bin");
+
+        let (verdict, basis) = derive_verdict(
+            Some(&fake_bin),
+            Some(2_000_000),
+            Some(1_000_000), // clock says current, but marker wins
+            "ac2-testbin",
+            repo_dir.path(),
+        );
+
+        std::env::remove_var("XDG_STATE_HOME");
+        drop(_guard);
+
+        assert_eq!(verdict, Verdict::InstalledStale, "expected InstalledStale by lineage");
+        assert_eq!(basis, crate::types::FreshnessBasis::Lineage, "expected Lineage basis");
+    }
+
+    // ── AC3: no marker → byte-for-byte existing clock behavior ───────────────
+
+    /// AC3a: No marker, installed_ts < src_ts → InstalledStale (ClockFallback).
+    #[test]
+    fn ac3a_no_marker_clock_stale() {
+        use tempfile::TempDir;
+
+        let repo_dir = TempDir::new().expect("repo dir");
+        let state_dir = TempDir::new().expect("state dir");
+        let _ = init_git_repo(repo_dir.path());
+
+        let fake_bin = state_dir.path().join("ac3a-bin");
+        std::fs::write(&fake_bin, "").expect("write fake bin");
+
+        // No marker written — XDG_STATE_HOME points to empty dir.
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("XDG_STATE_HOME", state_dir.path());
+
+        let (verdict, basis) = derive_verdict(
+            Some(&fake_bin),
+            Some(1_000_000), // installed_ts < src_ts
+            Some(2_000_000),
+            "ac3a-bin",
+            repo_dir.path(),
+        );
+
+        std::env::remove_var("XDG_STATE_HOME");
+        drop(_guard);
+
+        assert_eq!(verdict, Verdict::InstalledStale, "clock fallback should say stale");
+        assert_eq!(basis, crate::types::FreshnessBasis::ClockFallback);
+    }
+
+    /// AC3b: No marker, installed_ts >= src_ts → InstalledCurrent (ClockFallback).
+    #[test]
+    fn ac3b_no_marker_clock_current() {
+        use tempfile::TempDir;
+
+        let repo_dir = TempDir::new().expect("repo dir");
+        let state_dir = TempDir::new().expect("state dir");
+        let _ = init_git_repo(repo_dir.path());
+
+        let fake_bin = state_dir.path().join("ac3b-bin");
+        std::fs::write(&fake_bin, "").expect("write fake bin");
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("XDG_STATE_HOME", state_dir.path());
+
+        let (verdict, basis) = derive_verdict(
+            Some(&fake_bin),
+            Some(3_000_000), // installed_ts >= src_ts
+            Some(2_000_000),
+            "ac3b-bin",
+            repo_dir.path(),
+        );
+
+        std::env::remove_var("XDG_STATE_HOME");
+        drop(_guard);
+
+        assert_eq!(verdict, Verdict::InstalledCurrent, "clock fallback should say current");
+        assert_eq!(basis, crate::types::FreshnessBasis::ClockFallback);
+    }
+
+    // ── AC4: dirty working tree, binary built from last commit → current ──────
+
+    /// AC4: With a dirty working tree (uncommitted changes), a binary whose
+    /// marker fingerprint equals the committed HEAD is still `InstalledCurrent`.
+    /// The dirty-tree state must not produce a false stale.
+    #[test]
+    fn ac4_dirty_tree_does_not_falsely_stale() {
+        use tempfile::TempDir;
+
+        let repo_dir = TempDir::new().expect("repo dir");
+        let state_dir = TempDir::new().expect("state dir");
+
+        // Set up repo and get the committed HEAD hash.
+        let head_hash = init_git_repo(repo_dir.path());
+
+        // Make the working tree dirty (untracked / modified file).
+        std::fs::write(repo_dir.path().join("dirty.txt"), "uncommitted change")
+            .expect("write dirty file");
+
+        // Marker fingerprint = committed HEAD (binary was built from that commit).
+        let fp = SourceFingerprint(head_hash.clone());
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("XDG_STATE_HOME", state_dir.path());
+        write_marker("ac4-testbin", &repo_dir.path().to_string_lossy(), &fp)
+            .expect("write_marker");
+
+        let fake_bin = state_dir.path().join("ac4-testbin");
+        std::fs::write(&fake_bin, "").expect("write fake bin");
+
+        let (verdict, basis) = derive_verdict(
+            Some(&fake_bin),
+            Some(1_000_000), // clock says stale
+            Some(2_000_000),
+            "ac4-testbin",
+            repo_dir.path(),
+        );
+
+        std::env::remove_var("XDG_STATE_HOME");
+        drop(_guard);
+
+        assert_eq!(
+            verdict,
+            Verdict::InstalledCurrent,
+            "dirty tree must not produce false stale; HEAD hash={head_hash}"
+        );
+        assert_eq!(basis, crate::types::FreshnessBasis::Lineage);
+    }
+
+    // ── AC6: write_marker → derive_verdict round-trip ─────────────────────────
+
+    /// AC6: A marker written via the apply path (write_marker) and then read
+    /// by derive_verdict produces `InstalledCurrent` with no reinstall.
+    /// This confirms the same fingerprint function is used on both sides.
+    #[test]
+    fn ac6_apply_write_scan_read_roundtrip() {
+        use crate::marker::compute_fingerprint;
+        use tempfile::TempDir;
+
+        let repo_dir = TempDir::new().expect("repo dir");
+        let state_dir = TempDir::new().expect("state dir");
+        let _ = init_git_repo(repo_dir.path());
+
+        // Compute fingerprint the same way apply does.
+        let fp = compute_fingerprint(repo_dir.path()).expect("compute_fingerprint");
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("XDG_STATE_HOME", state_dir.path());
+        write_marker("ac6-testbin", &repo_dir.path().to_string_lossy(), &fp)
+            .expect("write_marker");
+
+        let fake_bin = state_dir.path().join("ac6-testbin");
+        std::fs::write(&fake_bin, "").expect("write fake bin");
+
+        // Now scan reads the marker — should match and return current.
+        let (verdict, basis) = derive_verdict(
+            Some(&fake_bin),
+            Some(1_000_000),
+            Some(2_000_000),
+            "ac6-testbin",
+            repo_dir.path(),
+        );
+
+        std::env::remove_var("XDG_STATE_HOME");
+        drop(_guard);
+
+        assert_eq!(verdict, Verdict::InstalledCurrent, "apply→scan roundtrip should be current");
+        assert_eq!(basis, crate::types::FreshnessBasis::Lineage);
     }
 }

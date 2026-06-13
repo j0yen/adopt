@@ -383,6 +383,7 @@ mod tests {
             installed_ts,
             fix_cmd: String::new(),
             age_vs_head: None,
+            freshness_basis: crate::types::FreshnessBasis::ClockFallback,
         }
     }
 

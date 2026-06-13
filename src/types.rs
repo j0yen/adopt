@@ -24,6 +24,18 @@ impl Verdict {
     }
 }
 
+/// The basis on which a freshness verdict was derived.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FreshnessBasis {
+    /// Verdict came from comparing the install marker fingerprint to the repo's
+    /// current committed-HEAD fingerprint. This is the authoritative signal.
+    Lineage,
+    /// No install marker was present; the verdict fell back to comparing the
+    /// binary's mtime against the newest src/ commit timestamp (heuristic).
+    ClockFallback,
+}
+
 /// A scanned artifact and its adoption verdict.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtifactResult {
@@ -49,4 +61,6 @@ pub struct ArtifactResult {
     /// Human-readable age relative to HEAD source (e.g. "9 days stale").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub age_vs_head: Option<String>,
+    /// How the freshness verdict was derived.
+    pub freshness_basis: FreshnessBasis,
 }

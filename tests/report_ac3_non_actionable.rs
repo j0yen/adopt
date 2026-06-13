@@ -4,7 +4,7 @@ use std::fs;
 use std::process::Command;
 use std::path::PathBuf;
 
-use adopt::types::{ArtifactResult, Verdict};
+use adopt::types::{ArtifactResult, FreshnessBasis, Verdict};
 
 fn adopt_bin() -> PathBuf {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -23,6 +23,7 @@ fn make_artifact(bin: &str, verdict: Verdict, is_daemon: bool, repo: &str) -> Ar
         installed_ts: None,
         fix_cmd: String::new(),
         age_vs_head: None,
+        freshness_basis: FreshnessBasis::ClockFallback,
     }
 }
 

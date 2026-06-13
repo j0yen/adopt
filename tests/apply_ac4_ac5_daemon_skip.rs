@@ -4,7 +4,7 @@
 //! AC5: Under --with-daemons when `rollout` is absent, daemon is skipped with note.
 
 use adopt::apply::{run_apply, ApplyOutcome};
-use adopt::types::{ArtifactResult, Verdict};
+use adopt::types::{ArtifactResult, FreshnessBasis, Verdict};
 use std::env;
 use tempfile::TempDir;
 
@@ -20,6 +20,7 @@ fn daemon_artifact(bin: &str, repo: &str) -> ArtifactResult {
         installed_ts: None,
         fix_cmd: format!("rollout install {repo}"),
         age_vs_head: None,
+        freshness_basis: FreshnessBasis::ClockFallback,
     }
 }
 
