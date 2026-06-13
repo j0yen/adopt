@@ -4,3 +4,4 @@ pub mod types;
 pub mod scan;
 pub mod apply;
 pub mod report;
+pub mod doctor;

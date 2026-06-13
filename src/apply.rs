@@ -7,6 +7,7 @@
 //! - Subprocess args are passed as a discrete vector; no `sh -c`.
 //! - Processes run strictly sequentially — never two `cargo install` concurrently.
 
+use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
@@ -40,6 +41,11 @@ pub enum ApplyOutcome {
     },
     /// Artifact had no rollout needed (fix_cmd is empty).
     NoRollout,
+    /// Install-prefix contained a literal `~` or resolved outside `$HOME`.
+    BadPrefix {
+        /// The rejected path string (raw, for display).
+        resolved: String,
+    },
 }
 
 /// Result for a single artifact in an `adopt apply` run.
@@ -84,6 +90,62 @@ fn rollout_on_path() -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+// ── Prefix validation ─────────────────────────────────────────────────────────
+
+/// Validates an install-prefix string before passing it to `cargo install --root`.
+///
+/// # Errors
+///
+/// Returns an `Err` (with the rejected value) when:
+/// - Any path component is exactly `~` or starts with `~` (cargo does not expand tildes).
+/// - `$HOME` is unset or empty (would silently relativise the prefix).
+/// - The canonicalised absolute path is not under `$HOME`.
+pub fn validate_root(root: &str) -> Result<PathBuf, String> {
+    // Reject any component that is `~` or starts with `~`.
+    for component in std::path::Path::new(root).components() {
+        use std::path::Component;
+        let s = match component {
+            Component::Normal(os) => os.to_string_lossy().into_owned(),
+            _ => continue,
+        };
+        if s == "~" || s.starts_with('~') {
+            return Err(format!(
+                "install prefix contains a literal tilde component (`{s}`); \
+                 cargo does not expand `~` — pass an absolute path instead"
+            ));
+        }
+    }
+
+    // $HOME must be set and non-empty.
+    let home_str = std::env::var("HOME").unwrap_or_default();
+    if home_str.is_empty() {
+        return Err(
+            "$HOME is unset or empty; cannot validate install prefix".to_owned(),
+        );
+    }
+    let home = PathBuf::from(&home_str);
+
+    // Canonicalize: join to $HOME if relative, then resolve symlinks / `..`.
+    let abs = if std::path::Path::new(root).is_absolute() {
+        PathBuf::from(root)
+    } else {
+        home.join(root)
+    };
+
+    let canonical = abs.canonicalize().unwrap_or(abs);
+
+    // Must reside under $HOME.
+    if !canonical.starts_with(&home) {
+        return Err(format!(
+            "install prefix `{}` resolves outside $HOME (`{}`); rejected",
+            root,
+            home.display()
+        ));
+    }
+
+    Ok(canonical)
 }
 
 // ── Core apply logic ─────────────────────────────────────────────────────────
@@ -218,6 +280,23 @@ pub fn run_apply(
 
         let argv = parse_cmd(&artifact.fix_cmd);
 
+        // ── Prefix guard ───────────────────────────────────────────────────
+        // If the command carries `--root <value>`, validate the prefix before
+        // executing anything — even in dry-run mode (so the dry-run output is
+        // accurate).
+        if let Some(root_idx) = argv.iter().position(|a| a == "--root") {
+            if let Some(root_val) = argv.get(root_idx + 1) {
+                if let Err(reason) = validate_root(root_val) {
+                    output.push(ApplyResult {
+                        bin: artifact.bin.clone(),
+                        verdict: ApplyOutcome::BadPrefix { resolved: reason },
+                        elapsed_ms: start.elapsed().as_millis() as u64,
+                    });
+                    continue;
+                }
+            }
+        }
+
         if dry_run || !execute {
             println!("[dry-run] would run: {}", artifact.fix_cmd);
             output.push(ApplyResult {
@@ -326,5 +405,51 @@ mod tests {
     fn apply_outcome_eq() {
         assert_eq!(ApplyOutcome::InstalledOk, ApplyOutcome::InstalledOk);
         assert_ne!(ApplyOutcome::InstalledOk, ApplyOutcome::InstalledCurrent);
+    }
+
+    // AC1: validate_root rejects literal tilde component.
+    #[test]
+    fn validate_root_tilde_rejected() {
+        assert!(validate_root("~/.local").is_err());
+        assert!(validate_root("~/foo/bar").is_err());
+        // A component that starts-with-tilde but is not bare ~.
+        assert!(validate_root("~jsy/.local").is_err());
+    }
+
+    // AC1 (positive): validate_root accepts absolute path under $HOME.
+    #[test]
+    fn validate_root_absolute_under_home_ok() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        if home.is_empty() {
+            return;
+        }
+        let root = format!("{home}/.local");
+        assert!(validate_root(&root).is_ok(), "should accept absolute path under $HOME");
+    }
+
+    // AC3: validate_root rejects a root outside $HOME.
+    #[test]
+    fn validate_root_outside_home_rejected() {
+        // /tmp is guaranteed to exist and canonicalise cleanly, and is never under $HOME.
+        let result = validate_root("/tmp");
+        assert!(result.is_err(), "expected rejection for /tmp (outside $HOME)");
+    }
+
+    // AC2: fix_cmd with --root ~/.local yields BadPrefix, Command is never spawned.
+    // (Behavioral: we verify the outcome type produced by the same logic used in run_apply.)
+    #[test]
+    fn bad_prefix_from_tilde_root() {
+        let fix_cmd = "cargo install --force --path /tmp/fake --root ~/.local";
+        let argv = parse_cmd(fix_cmd);
+        let root_idx = argv.iter().position(|a| a == "--root");
+        let root_val = root_idx.and_then(|i| argv.get(i + 1)).map(String::as_str).unwrap_or("");
+        let outcome = match validate_root(root_val) {
+            Err(reason) => ApplyOutcome::BadPrefix { resolved: reason },
+            Ok(_) => ApplyOutcome::InstalledOk,
+        };
+        assert!(
+            matches!(outcome, ApplyOutcome::BadPrefix { .. }),
+            "expected BadPrefix for tilde root, got {outcome:?}"
+        );
     }
 }
