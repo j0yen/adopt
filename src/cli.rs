@@ -1,10 +1,12 @@
 //! CLI argument parsing and command dispatch.
 
+use std::path::PathBuf;
+
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 
 use adopt::apply;
-use adopt::scan;
+use adopt::{report, scan};
 
 /// Detect shipped wintermute artifacts that never entered the live system.
 #[derive(Parser)]
@@ -45,6 +47,22 @@ enum Command {
         #[arg(long, value_name = "BIN")]
         only: Option<String>,
     },
+
+    /// Report unadopted artifacts to the docket ledger.
+    Report {
+        /// Caller-supplied opaque run identifier (e.g. `2026-06-13.1`).
+        #[arg(long, value_name = "RUN_ID")]
+        run: String,
+
+        /// Print docket commands without executing them.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Read a previously captured `adopt scan --format json` payload instead of re-running scan.
+        /// Use `-` to read from stdin.
+        #[arg(long, value_name = "FILE")]
+        from_json: Option<PathBuf>,
+    },
 }
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -81,6 +99,13 @@ pub(crate) fn run() -> Result<()> {
             if any_failed {
                 bail!("one or more installs failed");
             }
+        }
+        Command::Report { run, dry_run, from_json } => {
+            report::run_report(report::ReportArgs {
+                run_id: run,
+                dry_run,
+                from_json,
+            })?;
         }
     }
     Ok(())
