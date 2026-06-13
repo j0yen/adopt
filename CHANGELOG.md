@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.0 — 2026-06-13
+
+`adopt report` now counts "genuinely behind" using the lineage verdict rather than the clock:
+only artifacts with `verdict == installed-stale && freshness_basis == lineage` (marker fingerprint ≠ committed HEAD)
+are counted in `adopt-scan-stale-binaries`.  Clock-fallback artifacts (no marker) are separated into a distinct
+lower-severity finding `adopt-unmarked-installs` — they need a marker, not a reinstall — and never inflate the
+behind count.  When the lineage-behind count reaches 0, `adopt report` resolves `adopt-scan-stale-binaries`
+(emits a docket resolve marker) instead of re-parking it, so self-review stops carrying a fabricated count.
+`adopt report --format json` now emits a structured document with per-finding artifact lists including
+`freshness_basis` per artifact.  The resolve path uses the same docket subprocess mechanism as existing report calls.
+
 ## v0.8.0 — 2026-06-13
 
 `adopt reconcile`: one-shot pass that mints `InstallMarker` files for installed-but-unmarked binaries without rebuilding them. Uses a conservative heuristic — seeds a lineage marker only when the binary's mtime is at or after the previous commit's timestamp, ensuring genuinely-behind installs are not falsely marked current. Seeded markers carry `origin: "reconcile-seed"` (vs `"install"` for real reinstalls). Idempotent; `--dry-run` mode prints planned actions without writing. Clears the false-positive floor for all legacy installs that predate scion-verdict without requiring a full reinstall cycle.

@@ -68,6 +68,11 @@ enum Command {
         /// Use `-` to read from stdin.
         #[arg(long, value_name = "FILE")]
         from_json: Option<PathBuf>,
+
+        /// Output format: `docket` (default) runs docket subcommands; `json` emits a JSON
+        /// document with per-finding artifact lists including `freshness_basis`.
+        #[arg(long, default_value = "docket")]
+        format: ReportOutputFormat,
     },
 
     /// Detect and optionally clean adopt-created junk under literal-tilde prefixes.
@@ -96,6 +101,15 @@ enum Command {
 #[derive(Clone, Debug, ValueEnum)]
 enum OutputFormat {
     Table,
+    Json,
+}
+
+/// Output format for `adopt report`.
+#[derive(Clone, Debug, ValueEnum)]
+enum ReportOutputFormat {
+    /// Run (or dry-run print) `docket` subprocess calls.
+    Docket,
+    /// Emit a JSON document with per-finding artifact lists (includes `freshness_basis`).
     Json,
 }
 
@@ -131,11 +145,16 @@ pub(crate) fn run() -> Result<()> {
                 bail!("one or more installs failed");
             }
         }
-        Command::Report { run, dry_run, from_json } => {
+        Command::Report { run, dry_run, from_json, format } => {
+            let report_format = match format {
+                ReportOutputFormat::Docket => report::ReportFormat::Docket,
+                ReportOutputFormat::Json => report::ReportFormat::Json,
+            };
             report::run_report(report::ReportArgs {
                 run_id: run,
                 dry_run,
                 from_json,
+                format: report_format,
             })?;
         }
         Command::Doctor { clean } => {

@@ -1,4 +1,9 @@
 //! Report AC7: `--from-json` reads artifacts without re-running scan.
+//!
+//! Updated for scion-truth: an `InstalledStale + ClockFallback` artifact
+//! goes into the `adopt-unmarked-installs` bucket (1 docket `report` call)
+//! plus a `docket resolve` for `adopt-scan-stale-binaries` (lineage count=0),
+//! for a total of 2 docket invocations.
 
 use std::fs;
 use std::path::PathBuf;
@@ -50,7 +55,8 @@ fn from_json_reads_without_scan() {
     let record = tmp.path().join("calls.txt");
     let mock_dir = mock_docket_dir(&record);
 
-    // Provide exactly one actionable artifact.
+    // One clock-fallback stale artifact → adopt-unmarked-installs report
+    // + adopt-scan-stale-binaries resolve (lineage count = 0) = 2 calls total.
     let artifacts = vec![
         make_artifact("mybin", Verdict::InstalledStale, false, "/wm/mybin"),
     ];
@@ -78,5 +84,12 @@ fn from_json_reads_without_scan() {
 
     let calls = fs::read_to_string(&record).unwrap_or_default();
     let count = calls.lines().count();
-    assert_eq!(count, 1, "expected 1 docket call, got {count}: {calls}");
+    // 1 report (adopt-unmarked-installs:mybin) + 1 resolve = 2
+    assert_eq!(count, 2, "expected 2 docket calls (1 report + 1 resolve), got {count}: {calls}");
+
+    // Verify one line starts with "report" and one with "resolve".
+    let has_report = calls.lines().any(|l| l.starts_with("report"));
+    let has_resolve = calls.lines().any(|l| l.starts_with("resolve"));
+    assert!(has_report, "expected a 'report' docket call: {calls}");
+    assert!(has_resolve, "expected a 'resolve' docket call: {calls}");
 }

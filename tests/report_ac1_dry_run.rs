@@ -1,4 +1,11 @@
 //! Report AC1: `--dry-run` prints one command per actionable artifact; executes nothing.
+//!
+//! Updated for scion-truth:
+//! - `NotInstalled` → 1 `docket report` line
+//! - `InstalledStale(ClockFallback)` → 1 `docket report` line (adopt-unmarked-installs)
+//! - lineage count == 0 → 1 `docket resolve` line
+//! - `InstalledCurrent` → skipped (no line)
+//! Total: 3 printed lines.
 
 use std::fs;
 use std::path::PathBuf;
@@ -52,7 +59,7 @@ fn report_dry_run_prints_commands_executes_nothing() {
 
     let artifacts = vec![
         make_artifact("rollout", Verdict::NotInstalled, false, "/wm/rollout"),
-        make_artifact("warden", Verdict::InstalledStale, false, "/wm/warden"),
+        make_artifact("warden", Verdict::InstalledStale, false, "/wm/warden"), // ClockFallback
         make_artifact("adopt", Verdict::InstalledCurrent, false, "/wm/adopt"),
     ];
     let json_path = tmp.path().join("artifacts.json");
@@ -80,10 +87,10 @@ fn report_dry_run_prints_commands_executes_nothing() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let lines: Vec<&str> = stdout.lines().collect();
-    // Two actionable (not-installed + installed-stale); installed-current skipped.
-    assert_eq!(lines.len(), 2, "expected 2 dry-run lines, got:\n{stdout}");
+    // scion-truth: not-installed(1) + unmarked(1) + resolve(1) = 3 lines; installed-current skipped.
+    assert_eq!(lines.len(), 3, "expected 3 dry-run lines (2 reports + 1 resolve), got:\n{stdout}");
 
-    // docket was NOT called.
+    // docket was NOT called (dry-run only prints).
     let executed = if record.exists() {
         fs::read_to_string(&record).unwrap_or_default()
     } else {

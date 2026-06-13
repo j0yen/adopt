@@ -1,4 +1,9 @@
-//! Report AC3: `installed-current` and `not-a-bin` produce no docket invocation.
+//! Report AC3: `installed-current` and `not-a-bin` produce no docket `report` invocation.
+//!
+//! Updated for scion-truth: when there are no lineage-stale artifacts, a
+//! `docket resolve` IS emitted for `adopt-scan-stale-binaries`.  The
+//! assertion is refined: no "report" subcommand line, but a "resolve" line
+//! is acceptable.
 
 use std::fs;
 use std::process::Command;
@@ -45,7 +50,7 @@ fn mock_docket_dir(record: &std::path::Path) -> tempfile::TempDir {
 }
 
 #[test]
-fn installed_current_and_not_a_bin_produce_no_invocation() {
+fn installed_current_and_not_a_bin_produce_no_report_invocation() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let record = tmp.path().join("calls.txt");
     let mock_dir = mock_docket_dir(&record);
@@ -81,5 +86,14 @@ fn installed_current_and_not_a_bin_produce_no_invocation() {
     } else {
         String::new()
     };
-    assert!(calls.is_empty(), "docket was called for non-actionable: {calls}");
+
+    // With scion-truth, a `docket resolve` IS emitted when lineage count == 0.
+    // Assert that no "report" subcommand appears (the first word of each line is the subcommand).
+    for line in calls.lines() {
+        let first_word = line.split_whitespace().next().unwrap_or("");
+        assert_ne!(
+            first_word, "report",
+            "docket report was called for non-actionable artifact: {line}"
+        );
+    }
 }
