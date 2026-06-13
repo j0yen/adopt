@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.9.3 — 2026-06-13
+
+Convergence ledger (`fixpoint-converge-ledger`): new `src/converge.rs` module and
+`adopt converge` subcommand.  After each pipeline run callers may append a
+`ConvergeRecord` (`{run, ts, total, behind, dirty_blocked, fallback, lineage_current}`)
+to `~/.local/state/adopt/converge.jsonl` via `append_record` (O_APPEND, idempotent per
+run id).  `adopt converge [--last N] [--format json|table] [--stall-runs N]` reads the
+ledger and prints a trend table with `▲`/`▼`/`=` markers per column.  With `--run <id>`
+it also emits or resolves a `fixpoint-not-converging` docket finding: alert fires if
+`behind` increases run-over-run or stays `> 0` for `--stall-runs` (default 4) consecutive
+runs; finding auto-resolves when `behind` reaches 0.
+
 ## v0.9.0 — 2026-06-13
 
 `adopt report` now counts "genuinely behind" using the lineage verdict rather than the clock:

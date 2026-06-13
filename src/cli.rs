@@ -6,6 +6,7 @@ use anyhow::{bail, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 
 use adopt::apply;
+use adopt::converge;
 use adopt::doctor;
 use adopt::{reconcile, report, scan, verify};
 
@@ -93,6 +94,29 @@ enum Command {
         /// classified as SourceNewer-behind; those below are SourceNewer-sameday.
         #[arg(long, default_value = "2", value_name = "N")]
         behind_days: i64,
+    },
+
+    /// Show the convergence ledger trend and detect pipeline stalls.
+    Converge {
+        /// Show the last N runs (default: all).
+        #[arg(long, value_name = "N")]
+        last: Option<usize>,
+
+        /// Output format.
+        #[arg(long, default_value = "table")]
+        format: OutputFormat,
+
+        /// Alert if behind > 0 for this many consecutive runs.
+        #[arg(long, default_value = "4", value_name = "N")]
+        stall_runs: usize,
+
+        /// Caller-supplied run id for the docket finding (required to emit/resolve).
+        #[arg(long, value_name = "RUN_ID")]
+        run: Option<String>,
+
+        /// Print docket commands without executing them.
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// Mint lineage markers for installed-but-unmarked binaries (no rebuild).
@@ -188,6 +212,21 @@ pub(crate) fn run() -> Result<()> {
                 bail!("verify: one or more artifacts are not current");
             }
         }
+        Command::Converge { last, format, stall_runs, run, dry_run } => {
+            let ledger = converge_ledger_path();
+            let records = converge::read_records(&ledger, last)?;
+
+            match format {
+                OutputFormat::Table => converge::print_trend_table(&records)?,
+                OutputFormat::Json => converge::print_trend_json(&records)?,
+            }
+
+            // Emit / resolve docket finding when a run id is supplied.
+            if let Some(run_id) = run {
+                let alert = converge::check_convergence(&records, stall_runs);
+                converge::emit_convergence_finding(&run_id, alert.as_ref(), dry_run)?;
+            }
+        }
         Command::Reconcile { dry_run, no_include_dirty } => {
             let include_dirty = !no_include_dirty;
             let results = reconcile::run_reconcile(dry_run, include_dirty)?;
@@ -195,6 +234,12 @@ pub(crate) fn run() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Returns the path to the convergence ledger file.
+fn converge_ledger_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_owned());
+    std::path::PathBuf::from(home).join(".local/state/adopt/converge.jsonl")
 }
 
 /// Prints a human-readable summary of apply results.
