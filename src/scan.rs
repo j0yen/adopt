@@ -528,10 +528,6 @@ mod tests {
     use super::*;
     use crate::marker::{write_marker, SourceFingerprint};
     use std::process::Command;
-    use std::sync::Mutex;
-
-    /// Global mutex to serialise tests that mutate env vars.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     // ── format_age ────────────────────────────────────────────────────────────
 
@@ -617,7 +613,7 @@ mod tests {
 
         // Write a marker whose fingerprint IS the HEAD hash.
         let fp = SourceFingerprint(head_hash.clone());
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
         write_marker("ac1-testbin", &repo_dir.path().to_string_lossy(), &fp, "install")
             .expect("write_marker");
@@ -661,7 +657,7 @@ mod tests {
 
         // Write a marker with a DIFFERENT (old) fingerprint.
         let old_fp = SourceFingerprint(format!("old-{head_hash}"));
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
         write_marker("ac2-testbin", &repo_dir.path().to_string_lossy(), &old_fp, "install")
             .expect("write_marker");
@@ -699,7 +695,7 @@ mod tests {
         std::fs::write(&fake_bin, "").expect("write fake bin");
 
         // No marker written — XDG_STATE_HOME points to empty dir.
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
 
         let (verdict, basis) = derive_verdict(
@@ -729,7 +725,7 @@ mod tests {
         let fake_bin = state_dir.path().join("ac3b-bin");
         std::fs::write(&fake_bin, "").expect("write fake bin");
 
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
 
         let (verdict, basis) = derive_verdict(
@@ -768,7 +764,7 @@ mod tests {
 
         // Marker fingerprint = committed HEAD (binary was built from that commit).
         let fp = SourceFingerprint(head_hash.clone());
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
         write_marker("ac4-testbin", &repo_dir.path().to_string_lossy(), &fp, "install")
             .expect("write_marker");
@@ -812,7 +808,7 @@ mod tests {
         // Compute fingerprint the same way apply does.
         let fp = compute_fingerprint(repo_dir.path()).expect("compute_fingerprint");
 
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
         write_marker("ac6-testbin", &repo_dir.path().to_string_lossy(), &fp, "install")
             .expect("write_marker");

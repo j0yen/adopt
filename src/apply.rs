@@ -502,15 +502,11 @@ mod tests {
     use crate::marker::{
         compute_fingerprint, read_marker, write_marker, SourceFingerprint,
     };
-    use std::sync::Mutex;
     use tempfile::TempDir;
-
-    /// Serialise all tests that mutate `XDG_STATE_HOME`.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn with_state_home<F: FnOnce(&TempDir)>(f: F) {
         let tmp = TempDir::new().unwrap();
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("XDG_STATE_HOME", tmp.path());
         f(&tmp);
         std::env::remove_var("XDG_STATE_HOME");
