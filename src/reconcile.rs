@@ -408,24 +408,33 @@ mod tests {
     use super::*;
     use crate::marker::{read_marker, write_marker, SourceFingerprint as SF};
     use std::process::Command;
-    use std::sync::Mutex;
     use tempfile::TempDir;
 
-    /// Serialise env-mutating tests.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
     /// Sets XDG_STATE_HOME + WM_WINTERMUTE_DIR and runs `f`.
+    ///
+    /// Uses `catch_unwind` to ensure env var cleanup happens even if `f` panics,
+    /// preventing poisoned-lock env var leakage from affecting subsequent tests.
     fn with_env<F: FnOnce()>(state_dir: &TempDir, wm_dir: &TempDir, f: F) {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
         std::env::set_var("WM_WINTERMUTE_DIR", wm_dir.path());
         // Point HOME to a temp dir so local_bin() / cargo_bin() don't hit live dirs.
         let fake_home = TempDir::new().unwrap();
         std::env::set_var("HOME", fake_home.path());
-        f();
+        // Suppress system-level git config and allow any directory as safe so
+        // git commands succeed even when HOME points to an ephemeral temp dir.
+        std::env::set_var("GIT_CONFIG_NOSYSTEM", "1");
+        std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        // Always clean up env vars, even if the closure panicked.
         std::env::remove_var("XDG_STATE_HOME");
         std::env::remove_var("WM_WINTERMUTE_DIR");
         std::env::remove_var("HOME");
+        std::env::remove_var("GIT_CONFIG_NOSYSTEM");
+        std::env::remove_var("GIT_CONFIG_GLOBAL");
+        if let Err(e) = result {
+            std::panic::resume_unwind(e);
+        }
     }
 
     /// Initialise a minimal git repo and return the HEAD commit hash.

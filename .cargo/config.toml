@@ -1,0 +1,5 @@
+# Adopt crate: run lib unit tests single-threaded to prevent env-var races.
+# The unit tests use global env vars (XDG_STATE_HOME, HOME, etc.) serialised
+# by a shared Mutex. Running single-threaded gives the strongest guarantee.
+[env]
+RUST_TEST_THREADS = { value = "1", force = true }

@@ -178,14 +178,20 @@ pub fn check_convergence(
         });
     }
 
-    // Stall check: last stall_runs entries all have behind > 0.
+    // Stall check: last stall_runs entries all have behind > 0 AND behind is
+    // not strictly decreasing across the tail.  A decreasing trend is progress
+    // (converging toward 0) — it should not be misclassified as a stall.
     if stall_runs == 0 {
         return None;
     }
     let tail_start = records.len().saturating_sub(stall_runs);
     let tail = &records[tail_start..];
     let all_nonzero = !tail.is_empty() && tail.iter().all(|r| r.behind > 0);
-    if all_nonzero && tail.len() >= stall_runs {
+    // Check that the tail is NOT strictly monotonically decreasing.
+    // If every consecutive pair in the tail has behind[i] > behind[i+1], it's
+    // a converging sequence, not a stall.
+    let is_strictly_decreasing = tail.windows(2).all(|w| w[0].behind > w[1].behind);
+    if all_nonzero && tail.len() >= stall_runs && !is_strictly_decreasing {
         return Some(ConvergenceAlert {
             message: format!(
                 "behind has been > 0 for {} consecutive runs (stall)",

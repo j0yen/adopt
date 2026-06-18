@@ -386,10 +386,6 @@ fn print_summary(classified: &[ClassifiedArtifact]) {
 mod tests {
     use super::*;
     use crate::types::{ArtifactResult, Verdict};
-    use std::sync::Mutex;
-
-    // Serialize all tests that mutate env vars to avoid races.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn make_artifact(bin: &str, verdict: Verdict, installed_path: Option<&str>,
                      source_ts: Option<i64>, installed_ts: Option<i64>) -> ArtifactResult {
@@ -413,7 +409,7 @@ mod tests {
         let artifact = make_artifact("never-bin", Verdict::NotInstalled, None, None, None);
         // For NeverInstalled, classify doesn't touch env vars — no lock needed.
         // But we do override HOME to ensure there's no junk prefix or local/bin in real $HOME.
-        let _guard = ENV_LOCK.lock().expect("lock");
+        let _guard = crate::TEST_ENV_LOCK.lock().expect("lock");
         let old_home = std::env::var("HOME").unwrap_or_default();
         // Use a non-existent home to ensure NeverInstalled classification.
         std::env::set_var("HOME", "/tmp/adopt-test-ac1-nonexistent");
@@ -537,7 +533,7 @@ mod tests {
         let fake_bin = junk_bin_dir.join("mybin");
         fs::write(&fake_bin, "#!/bin/sh\necho hi").expect("write fake bin");
 
-        let _guard = ENV_LOCK.lock().expect("lock");
+        let _guard = crate::TEST_ENV_LOCK.lock().expect("lock");
         std::env::set_var("HOME", home);
 
         // Artifact says not installed (scan didn't find it normally).
@@ -567,7 +563,7 @@ mod tests {
         let fake_bin = local_bin_dir.join("offpathbin");
         fs::write(&fake_bin, "#!/bin/sh\necho hi").expect("write fake offpathbin");
 
-        let _guard = ENV_LOCK.lock().expect("lock");
+        let _guard = crate::TEST_ENV_LOCK.lock().expect("lock");
         std::env::set_var("HOME", home);
         let old_path = std::env::var("PATH").unwrap_or_default();
         // PATH has only /usr/bin — not our tmp local bin dir.
