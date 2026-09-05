@@ -57,9 +57,14 @@ fn scan_completes_without_binstale() {
         .output()
         .expect("run adopt");
 
-    assert!(
-        out.status.success(),
-        "scan should complete without binstale: {:?}",
+    // Since adopt-exit-code-and-docket-bridge, `adopt scan` exits 1 when any
+    // artifact is actionable. This fixture's bin is never installed, so the
+    // process must exit 1 — the point of this test is that scan *completes*
+    // (produces valid JSON) rather than crashing, not that it exits 0.
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "scan should complete (exit 1 for not-installed) without binstale: {:?}",
         out.status
     );
 
@@ -95,7 +100,14 @@ fn daemon_artifact_gets_is_daemon_true() {
         .output()
         .expect("run adopt");
 
-    assert!(out.status.success(), "{:?}", out.status);
+    // Since adopt-exit-code-and-docket-bridge, `adopt scan` exits 1 when any
+    // artifact is actionable; this fixture's daemon bin is never installed.
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected exit 1 for a not-installed daemon artifact: {:?}",
+        out.status
+    );
 
     let stdout = String::from_utf8_lossy(&out.stdout);
     let arr: Vec<serde_json::Value> = serde_json::from_str(&stdout)

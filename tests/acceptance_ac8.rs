@@ -47,7 +47,15 @@ fn match_regex_filters_output() {
         .output()
         .expect("run adopt");
 
-    assert!(out.status.success(), "{:?}", out.status);
+    // Since adopt-exit-code-and-docket-bridge, `adopt scan` exits 1 when any
+    // surviving (post-filter) artifact is actionable. Both wm-audio and
+    // wm-stt survive the `^wm-` filter as not-installed, so exit must be 1.
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected exit 1: not-installed artifacts survived the match filter: {:?}",
+        out.status
+    );
 
     let stdout = String::from_utf8_lossy(&out.stdout);
     let arr: Vec<serde_json::Value> = serde_json::from_str(&stdout)

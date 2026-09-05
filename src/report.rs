@@ -136,15 +136,19 @@ pub fn build_docket_args(run_id: &str, artifact: &ArtifactResult) -> Vec<String>
 ///
 /// Used when the lineage-behind count reaches zero to auto-resolve the
 /// `adopt-scan-stale-binaries` finding.
+///
+/// Docket's real `resolve` subcommand signature is
+/// `docket resolve [OPTIONS] <KEY>` — the key is positional and the only
+/// option is an optional `--reason`. There is no `--run` or `--key` flag;
+/// passing either causes clap to reject the invocation with a usage error.
 #[must_use]
-pub fn build_resolve_args(run_id: &str, slug: &str) -> Vec<String> {
-    vec![
-        "resolve".to_owned(),
-        "--run".to_owned(),
-        run_id.to_owned(),
-        "--key".to_owned(),
-        slug.to_owned(),
-    ]
+pub fn build_resolve_args(slug: &str, reason: Option<&str>) -> Vec<String> {
+    let mut args = vec!["resolve".to_owned(), slug.to_owned()];
+    if let Some(r) = reason {
+        args.push("--reason".to_owned());
+        args.push(r.to_owned());
+    }
+    args
 }
 
 /// Returns the `StaleReason` docket slug for a single artifact.
@@ -219,6 +223,14 @@ fn call_docket(docket_args: &[String], dry_run: bool) -> Result<()> {
             .status()
             .context("spawning docket")?;
         if !status.success() {
+            let argv = std::iter::once("docket".to_owned())
+                .chain(docket_args.iter().cloned())
+                .collect::<Vec<_>>()
+                .join(" ");
+            #[allow(clippy::print_stderr)]
+            {
+                eprintln!("adopt: docket argv: {argv}");
+            }
             bail!("docket exited with status {status}");
         }
     }
@@ -292,7 +304,7 @@ pub fn run_report(args: ReportArgs) -> Result<()> {
 
     // ── Auto-resolve headline finding when lineage count == 0 ────────────────
     if lineage_stale.is_empty() {
-        let resolve_args = build_resolve_args(&args.run_id, SLUG_STALE_LINEAGE);
+        let resolve_args = build_resolve_args(SLUG_STALE_LINEAGE, None);
         call_docket(&resolve_args, args.dry_run)?;
     }
 

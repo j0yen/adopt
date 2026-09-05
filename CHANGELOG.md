@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.11.1 — 2026-09-05
+
+`adopt scan` exits 0 even when artifacts are not installed, so every caller that trusts the
+exit code — the self-review `adopt_scan_probe` playbook first among them — reads "all current"
+on a box with 22 unadopted artifacts. Separately, `adopt report` shells out to `docket resolve`
+with `--run`/`--key` flags that docket rejects (exit 2), so resolved findings never close in
+the ledger. Two small fixes in one patch release: the Scan CLI arm now `bail!()`s (exit 1) when
+any surviving artifact is `not-installed` or `installed-stale`, mirroring the Apply/Verify arms,
+while stdout stays byte-identical; and `build_resolve_args` now emits docket's real
+`resolve [OPTIONS] <KEY>` shape (positional key, optional `--reason`, no `--run`/`--key`). A
+failed docket call now also logs its full argv to stderr before the exit-status line, so the
+next CLI drift is diagnosable from the error message alone.
+
 ## v0.9.3 — 2026-06-13
 
 Convergence ledger (`fixpoint-converge-ledger`): new `src/converge.rs` module and

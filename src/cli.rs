@@ -163,6 +163,14 @@ pub(crate) fn run() -> Result<()> {
                 OutputFormat::Table => scan::print_table(&results),
                 OutputFormat::Json => scan::print_json(&results)?,
             }
+
+            // Exit non-zero if any surviving artifact is not-installed or
+            // installed-stale, mirroring the Apply/Verify arms. Stdout is
+            // already fully written above, so this does not change output shape.
+            let any_actionable = results.iter().any(|r| r.verdict.is_actionable());
+            if any_actionable {
+                bail!("scan: one or more artifacts are not installed or are stale");
+            }
         }
         Command::Apply { execute, with_daemons, only, force_all } => {
             let dry_run = !execute;

@@ -75,7 +75,15 @@ fn absent_binary_reports_not_installed_with_fix_cmd() {
         .output()
         .expect("run adopt");
 
-    assert!(out.status.success(), "non-zero: {:?}", out.status);
+    // Since adopt-exit-code-and-docket-bridge, `adopt scan` exits 1 when any
+    // artifact is not-installed. This fixture's whole point is a not-installed
+    // artifact, so the process must exit 1 while still emitting full JSON.
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected exit 1 for a not-installed artifact: {:?}",
+        out.status
+    );
 
     let stdout = String::from_utf8_lossy(&out.stdout);
     let arr: Vec<serde_json::Value> = serde_json::from_str(&stdout)

@@ -402,10 +402,13 @@ fn ac5_resolve_uses_docket_mechanism() {
         "docket resolve must be recorded in mock call log, got: {calls}"
     );
 
-    // build_resolve_args must produce valid args (unit-level check).
-    let resolve_args = adopt::report::build_resolve_args("test-run", "adopt-scan-stale-binaries");
-    let first = resolve_args.first().map(String::as_str).unwrap_or("");
-    assert_eq!(first, "resolve", "first arg must be 'resolve'");
-    let has_key_arg = resolve_args.windows(2).any(|w| w[0] == "--key");
-    assert!(has_key_arg, "resolve args must include --key");
+    // build_resolve_args must produce docket's real positional signature
+    // (`docket resolve [OPTIONS] <KEY>`), not the old `--run`/`--key` shape.
+    // See tests/docket_bridge_ac5.rs for the full argv contract.
+    let resolve_args = adopt::report::build_resolve_args("adopt-scan-stale-binaries", None);
+    assert_eq!(
+        resolve_args,
+        vec!["resolve".to_owned(), "adopt-scan-stale-binaries".to_owned()],
+        "resolve args must be positional with no --run/--key flags"
+    );
 }

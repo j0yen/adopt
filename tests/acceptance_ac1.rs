@@ -20,8 +20,11 @@ fn scan_json_emits_array_with_required_keys() {
         .output()
         .expect("failed to run adopt");
 
-    assert!(out.status.success(), "adopt scan --format json exited non-zero: {:?}", out.status);
-
+    // Note: exit code is NOT asserted here — since adopt-exit-code-and-docket-bridge,
+    // `adopt scan` exits 1 when any artifact is actionable (not-installed /
+    // installed-stale), which this real-environment scan may legitimately hit.
+    // See tests/scan_exit_ac1.rs / scan_exit_ac2.rs for exit-code coverage.
+    // Regardless of exit code, stdout must be fully-written valid JSON.
     let stdout = String::from_utf8_lossy(&out.stdout);
     let val: serde_json::Value = serde_json::from_str(&stdout)
         .expect("stdout was not valid JSON");
