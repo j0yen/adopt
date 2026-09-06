@@ -17,6 +17,16 @@ use crate::marker;
 use crate::scan;
 use crate::types::Verdict;
 
+/// Milliseconds elapsed since `start`, as a bounds-checked `u64`.
+///
+/// `Duration::as_millis` returns `u128`; a single artifact install will never
+/// run for anywhere near `u64::MAX` milliseconds (over 500 million years), but
+/// we saturate rather than silently truncate on the off chance the clock is
+/// wrong or the process is suspended for an extreme length of time.
+fn elapsed_ms(start: Instant) -> u64 {
+    start.elapsed().as_millis().try_into().unwrap_or(u64::MAX)
+}
+
 // ── Public types ─────────────────────────────────────────────────────────────
 
 /// Outcome for a single artifact during `adopt apply`.
@@ -190,7 +200,7 @@ pub fn run_apply(
             output.push(ApplyResult {
                 bin: artifact.bin.clone(),
                 verdict: ApplyOutcome::InstalledCurrent,
-                elapsed_ms: start.elapsed().as_millis() as u64,
+                elapsed_ms: elapsed_ms(start),
             });
             continue;
         }
@@ -206,7 +216,7 @@ pub fn run_apply(
                             artifact.bin
                         ),
                     },
-                    elapsed_ms: start.elapsed().as_millis() as u64,
+                    elapsed_ms: elapsed_ms(start),
                 });
                 continue;
             }
@@ -216,7 +226,7 @@ pub fn run_apply(
                 output.push(ApplyResult {
                     bin: artifact.bin.clone(),
                     verdict: ApplyOutcome::SkippedDaemonsNotRequested,
-                    elapsed_ms: start.elapsed().as_millis() as u64,
+                    elapsed_ms: elapsed_ms(start),
                 });
                 continue;
             }
@@ -229,7 +239,7 @@ pub fn run_apply(
                 output.push(ApplyResult {
                     bin: artifact.bin.clone(),
                     verdict: ApplyOutcome::RolloutDelegated,
-                    elapsed_ms: start.elapsed().as_millis() as u64,
+                    elapsed_ms: elapsed_ms(start),
                 });
                 continue;
             }
@@ -244,7 +254,7 @@ pub fn run_apply(
                     output.push(ApplyResult {
                         bin: artifact.bin.clone(),
                         verdict: ApplyOutcome::RolloutDelegated,
-                        elapsed_ms: start.elapsed().as_millis() as u64,
+                        elapsed_ms: elapsed_ms(start),
                     });
                 }
                 Ok(s) => {
@@ -255,7 +265,7 @@ pub fn run_apply(
                     output.push(ApplyResult {
                         bin: artifact.bin.clone(),
                         verdict: ApplyOutcome::Failed { reason },
-                        elapsed_ms: start.elapsed().as_millis() as u64,
+                        elapsed_ms: elapsed_ms(start),
                     });
 
                 }
@@ -265,7 +275,7 @@ pub fn run_apply(
                         verdict: ApplyOutcome::Failed {
                             reason: format!("could not spawn rollout: {e}"),
                         },
-                        elapsed_ms: start.elapsed().as_millis() as u64,
+                        elapsed_ms: elapsed_ms(start),
                     });
 
                 }
@@ -278,7 +288,7 @@ pub fn run_apply(
             output.push(ApplyResult {
                 bin: artifact.bin.clone(),
                 verdict: ApplyOutcome::NoRollout,
-                elapsed_ms: start.elapsed().as_millis() as u64,
+                elapsed_ms: elapsed_ms(start),
             });
             continue;
         }
@@ -295,7 +305,7 @@ pub fn run_apply(
                     output.push(ApplyResult {
                         bin: artifact.bin.clone(),
                         verdict: ApplyOutcome::BadPrefix { resolved: reason },
-                        elapsed_ms: start.elapsed().as_millis() as u64,
+                        elapsed_ms: elapsed_ms(start),
                     });
                     continue;
                 }
@@ -319,7 +329,7 @@ pub fn run_apply(
                             output.push(ApplyResult {
                                 bin: artifact.bin.clone(),
                                 verdict: ApplyOutcome::AlreadyCurrent,
-                                elapsed_ms: start.elapsed().as_millis() as u64,
+                                elapsed_ms: elapsed_ms(start),
                             });
                             continue;
                         }
@@ -333,7 +343,7 @@ pub fn run_apply(
             output.push(ApplyResult {
                 bin: artifact.bin.clone(),
                 verdict: ApplyOutcome::InstalledOk, // would-be
-                elapsed_ms: start.elapsed().as_millis() as u64,
+                elapsed_ms: elapsed_ms(start),
             });
             continue;
         }
@@ -348,7 +358,7 @@ pub fn run_apply(
                     verdict: ApplyOutcome::Failed {
                         reason: "fix_cmd is empty after parse".to_owned(),
                     },
-                    elapsed_ms: start.elapsed().as_millis() as u64,
+                    elapsed_ms: elapsed_ms(start),
                 });
 
                 continue;
@@ -372,7 +382,7 @@ pub fn run_apply(
                     output.push(ApplyResult {
                         bin: artifact.bin.clone(),
                         verdict: ApplyOutcome::InstalledOk,
-                        elapsed_ms: start.elapsed().as_millis() as u64,
+                        elapsed_ms: elapsed_ms(start),
                     });
                 } else {
                     let reason = format!(
@@ -382,7 +392,7 @@ pub fn run_apply(
                     output.push(ApplyResult {
                         bin: artifact.bin.clone(),
                         verdict: ApplyOutcome::Failed { reason },
-                        elapsed_ms: start.elapsed().as_millis() as u64,
+                        elapsed_ms: elapsed_ms(start),
                     });
 
                 }
@@ -396,7 +406,7 @@ pub fn run_apply(
                 output.push(ApplyResult {
                     bin: artifact.bin.clone(),
                     verdict: ApplyOutcome::Failed { reason },
-                    elapsed_ms: start.elapsed().as_millis() as u64,
+                    elapsed_ms: elapsed_ms(start),
                 });
 
             }
@@ -406,7 +416,7 @@ pub fn run_apply(
                     verdict: ApplyOutcome::Failed {
                         reason: format!("could not spawn {prog}: {e}"),
                     },
-                    elapsed_ms: start.elapsed().as_millis() as u64,
+                    elapsed_ms: elapsed_ms(start),
                 });
 
             }
