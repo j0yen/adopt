@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.11.2 — 2026-09-06
+
+`adopt scan` exits 0 even when artifacts are not installed, so every caller that trusts the exit code — the self-review `adopt_scan_probe` playbook first among them — reads "all current" on a box with 22 unadopted artifacts. Separately, `adopt report` shells out to `docket resolve` with `--run`/`--key` flags that docket rejects (exit 2), so resolved findings never close in the ledger. Two small fixes in one patch release.
+
 ## v0.11.1 — 2026-09-05
 
 `adopt scan` exits 0 even when artifacts are not installed, so every caller that trusts the
