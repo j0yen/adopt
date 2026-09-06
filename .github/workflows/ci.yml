@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "autobuilder/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+# PRD-adopt-exit-code-and-docket-bridge. This repo had no CI workflow at all
+# (extend-gate ci-checks blocker: run_count=0). Kept deliberately minimal:
+# build + test + clippy, no cargo-deny and no `-D warnings` on clippy yet.
+#
+# `cargo clippy --workspace -- -D warnings` currently fails with 67
+# pre-existing warnings elsewhere in the repo (dangerous `as` casts,
+# truncating u128->u64 casts, doc-markdown, etc.), and `cargo deny check
+# advisories` currently flags RUSTSEC-2026-0190 (anyhow 1.0.102). Fixing
+# those is separate, larger scope than this PRD's own diff -- tracked as a
+# follow-up, not done here. Tightening this workflow to `-D warnings` (and
+# adding cargo-deny) once that cleanup lands is the next step.
+jobs:
+  gate:
+    name: build + test + clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: install rust toolchain (pinned by rust-toolchain.toml)
+        uses: actions-rust-lang/setup-rust-toolchain@9d7e65c320fdb52dcd45ffaa68deb6c02c8754d9 # v1.10.1
+
+      - name: cargo build --release
+        run: cargo build --release --workspace
+
+      - name: cargo test --release
+        run: cargo test --release --workspace
+
+      # Deliberately not `-D warnings` yet -- see note above the `jobs:` key.
+      - name: cargo clippy
+        run: cargo clippy --workspace
