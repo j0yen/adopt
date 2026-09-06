@@ -1,4 +1,4 @@
-//! AC3 (scan_exit_stale): Given a lineage with at least one `installed-stale`
+//! AC3 (`scan_exit_stale)`: Given a lineage with at least one `installed-stale`
 //! artifact and zero `not-installed`, when `adopt scan` runs, the process
 //! exits 1.
 //!

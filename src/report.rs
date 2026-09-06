@@ -113,7 +113,7 @@ pub fn build_docket_args(run_id: &str, artifact: &ArtifactResult) -> Vec<String>
     let severity = if artifact.is_daemon { "error" } else { "warn" };
     let sha = source_sha(&artifact.repo);
     let evidence_path = format!("path:{}", artifact.repo);
-    let evidence_commit = format!("commit:{}", sha);
+    let evidence_commit = format!("commit:{sha}");
 
     vec![
         "report".to_owned(),
@@ -251,7 +251,7 @@ fn call_docket(docket_args: &[String], dry_run: bool) -> Result<()> {
 /// # Errors
 /// Returns an error if `docket` is not on `$PATH`, the scan fails, or any
 /// subprocess returns a non-zero exit status.
-pub fn run_report(args: ReportArgs) -> Result<()> {
+pub fn run_report(args: &ReportArgs) -> Result<()> {
     // Verify docket is on PATH before doing any work.
     if which_docket().is_none() {
         bail!(
@@ -337,6 +337,14 @@ pub fn run_report(args: ReportArgs) -> Result<()> {
     Ok(())
 }
 
+/// JSON payload shape for `adopt report --format json`.
+#[derive(Serialize)]
+struct JsonReport {
+    lineage_stale: Vec<FindingArtifact>,
+    clock_fallback: Vec<FindingArtifact>,
+    not_installed: Vec<FindingArtifact>,
+}
+
 /// Emit JSON output for `adopt report --format json`.
 ///
 /// Emits an object with three keys:
@@ -372,13 +380,6 @@ fn emit_json(
             detail,
         }
     };
-
-    #[derive(Serialize)]
-    struct JsonReport {
-        lineage_stale: Vec<FindingArtifact>,
-        clock_fallback: Vec<FindingArtifact>,
-        not_installed: Vec<FindingArtifact>,
-    }
 
     let report = JsonReport {
         lineage_stale: lineage_stale.iter().map(|a| to_finding(a)).collect(),

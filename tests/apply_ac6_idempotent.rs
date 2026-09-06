@@ -1,10 +1,10 @@
-//! AC6: Re-running adopt apply after a successful install → InstalledCurrent (idempotent).
+//! AC6: Re-running adopt apply after a successful install → `InstalledCurrent` (idempotent).
 
 use adopt::apply::{run_apply, ApplyOutcome};
 use std::env;
 use tempfile::TempDir;
 
-/// Idempotent: if scan finds InstalledCurrent → outcome is InstalledCurrent, not re-installed.
+/// Idempotent: if scan finds `InstalledCurrent` → outcome is `InstalledCurrent`, not re-installed.
 #[test]
 fn apply_idempotent_on_current_artifacts() {
     // Empty wintermute dir — scan returns nothing.

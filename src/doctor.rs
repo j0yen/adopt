@@ -7,8 +7,6 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
-
 // ── Path helpers (mirrors scan.rs, kept local to avoid coupling) ──────────────
 
 /// Returns the user's home directory from `$HOME`.
@@ -122,7 +120,7 @@ fn find_crates_toml(dir: &Path, depth: usize, max_depth: usize) -> bool {
             if find_crates_toml(&path, depth + 1, max_depth) {
                 return true;
             }
-        } else if path.file_name().map(|n| n == ".crates.toml").unwrap_or(false) {
+        } else if path.file_name().is_some_and(|n| n == ".crates.toml") {
             return true;
         }
     }
@@ -134,28 +132,24 @@ fn find_crates_toml(dir: &Path, depth: usize, max_depth: usize) -> bool {
 /// Runs `adopt doctor [--clean]`.
 ///
 /// Returns `true` if any debris was found (caller should exit non-zero).
-///
-/// # Errors
-///
-/// Returns an error on I/O failures during cleanup.
-pub fn run_doctor(clean: bool) -> Result<bool> {
+#[must_use]
+pub fn run_doctor(clean: bool) -> bool {
     run_doctor_with_home(&home_dir(), clean)
 }
 
 /// Inner implementation; separated so tests can inject an explicit home without
 /// mutating `$HOME` (which is not thread-safe).
 ///
-/// # Errors
-///
-/// Returns an error on I/O failures during cleanup.
+/// Individual removal failures during `--clean` are reported inline and never
+/// abort the scan, so this never actually returns an error — no `Result`.
 #[allow(clippy::print_stdout)]
-pub(crate) fn run_doctor_with_home(home: &Path, clean: bool) -> Result<bool> {
+pub(crate) fn run_doctor_with_home(home: &Path, clean: bool) -> bool {
     let junk_root = home.join("~");
     let entries = find_junk_entries(home);
 
     if entries.is_empty() {
         println!("adopt doctor: no junk debris found under `{}`", junk_root.display());
-        return Ok(false);
+        return false;
     }
 
     println!(
@@ -175,9 +169,7 @@ pub(crate) fn run_doctor_with_home(home: &Path, clean: bool) -> Result<bool> {
         any_debris = true;
         let twin_str = entry
             .twin
-            .as_ref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "(none)".to_owned());
+            .as_ref().map_or_else(|| "(none)".to_owned(), |p| p.display().to_string());
         println!(
             "{:<60} {:>7}B {}",
             entry.junk_path.display(),
@@ -212,7 +204,7 @@ pub(crate) fn run_doctor_with_home(home: &Path, clean: bool) -> Result<bool> {
         prune_empty_dirs(&junk_root);
     }
 
-    Ok(any_debris)
+    any_debris
 }
 
 /// Walks `dir` bottom-up and removes directories that are now empty.
@@ -270,7 +262,7 @@ mod tests {
     fn validate_root_rejects_tilde() {
         // AC1: literal tilde component
         let result = crate::apply::validate_root("~/.local");
-        assert!(result.is_err(), "expected Err for ~/ prefix, got {:?}", result);
+        assert!(result.is_err(), "expected Err for ~/ prefix, got {result:?}");
     }
 
     #[test]
@@ -284,14 +276,14 @@ mod tests {
         // We don't need to canonicalize; /home/jsy canonicalises to /home/jsy.
         let root = format!("{home}/.local");
         let result = crate::apply::validate_root(&root);
-        assert!(result.is_ok(), "expected Ok for absolute path under $HOME `{home}`, got {:?}", result);
+        assert!(result.is_ok(), "expected Ok for absolute path under $HOME `{home}`, got {result:?}");
     }
 
     #[test]
     fn validate_root_rejects_outside_home() {
         // AC3: path outside $HOME — /tmp is not under $HOME on any sane system.
         let result = crate::apply::validate_root("/tmp/evil");
-        assert!(result.is_err(), "expected Err for /tmp/evil, got {:?}", result);
+        assert!(result.is_err(), "expected Err for /tmp/evil, got {result:?}");
     }
 
     // AC2 — BadPrefix outcome when fix_cmd carries --root ~/.local
@@ -311,8 +303,7 @@ mod tests {
         };
         assert!(
             matches!(outcome, ApplyOutcome::BadPrefix { .. }),
-            "expected BadPrefix, got {:?}",
-            outcome
+            "expected BadPrefix, got {outcome:?}"
         );
     }
 
@@ -325,7 +316,7 @@ mod tests {
 
         make_junk_tree(home, "fake-bin");
 
-        let result = run_doctor_with_home(home, false).unwrap();
+        let result = run_doctor_with_home(home, false);
         assert!(result, "expected doctor to report debris");
     }
 
@@ -344,7 +335,7 @@ mod tests {
         make_junk_tree(home, "bin-no-twin");
 
         // run_doctor_with_home uses home for both junk scan and twin lookup.
-        let result = run_doctor_with_home(home, true).unwrap();
+        let result = run_doctor_with_home(home, true);
         assert!(result, "expected debris to be reported");
 
         // bin-with-twin junk should be gone (had a twin).
@@ -365,7 +356,7 @@ mod tests {
         // Only a twin-less junk binary — the parent dir must survive.
         make_junk_tree(home, "orphan-bin");
 
-        run_doctor_with_home(home, true).unwrap();
+        run_doctor_with_home(home, true);
 
         let junk_bin_dir = home.join("~/.local/bin");
         assert!(

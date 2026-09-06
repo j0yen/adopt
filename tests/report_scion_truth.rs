@@ -3,7 +3,7 @@
 //! AC1: lineage-behind count == 0 → adopt-scan-stale-binaries resolved
 //! AC2: lineage-behind count == 1 → finding stays open (report emitted)
 //! AC3: clock-fallback stale → adopt-unmarked-installs, NOT in behind count
-//! AC4: --format json includes per-artifact freshness_basis
+//! AC4: --format json includes per-artifact `freshness_basis`
 //! AC5: resolve path uses same docket mechanism as reports
 
 use std::fs;
@@ -66,7 +66,7 @@ fn write_artifacts_json(dir: &tempfile::TempDir, artifacts: &[ArtifactResult]) -
     path
 }
 
-/// Run `adopt report` with given args and return (success, stdout, docket_calls).
+/// Run `adopt report` with given args and return (success, stdout, `docket_calls`).
 fn run_report(
     json_path: &std::path::Path,
     mock_dir: &tempfile::TempDir,
@@ -248,7 +248,7 @@ fn ac3_clock_fallback_goes_to_unmarked_bucket() {
     assert!(has_resolve, "resolve must be emitted when lineage count == 0, got: {calls}");
 }
 
-/// AC3b: clock-fallback and lineage-stale are disjoint — they never appear in
+/// `AC3b`: clock-fallback and lineage-stale are disjoint — they never appear in
 /// the same bucket.
 #[test]
 fn ac3b_buckets_are_disjoint() {

@@ -1,11 +1,11 @@
 //! AC3: Installs run strictly one at a time — structural assertion via
-//! the sequential processing in run_apply (no concurrent spawn).
+//! the sequential processing in `run_apply` (no concurrent spawn).
 
 use adopt::apply::{run_apply, ApplyOutcome};
 use std::env;
 use tempfile::TempDir;
 
-/// Verify that run_apply processes artifacts sequentially (structural guarantee).
+/// Verify that `run_apply` processes artifacts sequentially (structural guarantee).
 /// We do this by checking that outcomes are returned in a deterministic ordered Vec,
 /// and that the function returns a single result for a single artifact.
 #[test]

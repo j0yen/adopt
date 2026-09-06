@@ -55,7 +55,7 @@ pub struct ConvergenceAlert {
 
 // ── Ledger I/O ────────────────────────────────────────────────────────────────
 
-/// Append `record` to `path` (JSONL, O_APPEND).
+/// Append `record` to `path` (JSONL, `O_APPEND`).
 ///
 /// If a line with the same `run` id is already present the call is a no-op
 /// (idempotent per run id).
@@ -185,12 +185,14 @@ pub fn check_convergence(
         return None;
     }
     let tail_start = records.len().saturating_sub(stall_runs);
-    let tail = &records[tail_start..];
+    let tail = records.get(tail_start..).unwrap_or(&[]);
     let all_nonzero = !tail.is_empty() && tail.iter().all(|r| r.behind > 0);
     // Check that the tail is NOT strictly monotonically decreasing.
     // If every consecutive pair in the tail has behind[i] > behind[i+1], it's
     // a converging sequence, not a stall.
-    let is_strictly_decreasing = tail.windows(2).all(|w| w[0].behind > w[1].behind);
+    let is_strictly_decreasing = tail
+        .windows(2)
+        .all(|w| matches!(w, [a, b] if a.behind > b.behind));
     if all_nonzero && tail.len() >= stall_runs && !is_strictly_decreasing {
         return Some(ConvergenceAlert {
             message: format!(
@@ -221,28 +223,32 @@ pub fn emit_convergence_finding(
     alert: Option<&ConvergenceAlert>,
     dry_run: bool,
 ) -> Result<()> {
-    let args: Vec<String> = match alert {
-        Some(a) => vec![
-            "report".to_owned(),
-            "--run".to_owned(),
-            run_id.to_owned(),
-            "--key".to_owned(),
-            SLUG_NOT_CONVERGING.to_owned(),
-            "--title".to_owned(),
-            format!("fixpoint pipeline not converging: behind={}", a.behind),
-            "--severity".to_owned(),
-            "warn".to_owned(),
-            "--evidence".to_owned(),
-            format!("detail:{}", a.message),
-        ],
-        None => vec![
-            "resolve".to_owned(),
-            "--run".to_owned(),
-            run_id.to_owned(),
-            "--key".to_owned(),
-            SLUG_NOT_CONVERGING.to_owned(),
-        ],
-    };
+    let args: Vec<String> = alert.map_or_else(
+        || {
+            vec![
+                "resolve".to_owned(),
+                "--run".to_owned(),
+                run_id.to_owned(),
+                "--key".to_owned(),
+                SLUG_NOT_CONVERGING.to_owned(),
+            ]
+        },
+        |a| {
+            vec![
+                "report".to_owned(),
+                "--run".to_owned(),
+                run_id.to_owned(),
+                "--key".to_owned(),
+                SLUG_NOT_CONVERGING.to_owned(),
+                "--title".to_owned(),
+                format!("fixpoint pipeline not converging: behind={}", a.behind),
+                "--severity".to_owned(),
+                "warn".to_owned(),
+                "--evidence".to_owned(),
+                format!("detail:{}", a.message),
+            ]
+        },
+    );
 
     if dry_run {
         let display: Vec<String> =
@@ -267,7 +273,7 @@ pub fn emit_convergence_finding(
 // ── Trend display ─────────────────────────────────────────────────────────────
 
 /// Trend marker comparing current vs previous value.
-fn trend_marker(current: u32, prev: Option<u32>) -> char {
+const fn trend_marker(current: u32, prev: Option<u32>) -> char {
     match prev {
         None => '=',
         Some(p) => {
@@ -287,10 +293,10 @@ fn trend_marker(current: u32, prev: Option<u32>) -> char {
 /// # Errors
 /// Returns an error if stdout write fails.
 #[allow(clippy::print_stdout)]
-pub fn print_trend_table(records: &[ConvergeRecord]) -> Result<()> {
+pub fn print_trend_table(records: &[ConvergeRecord]) {
     if records.is_empty() {
         println!("No convergence records found.");
-        return Ok(());
+        return;
     }
 
     println!(
@@ -302,25 +308,23 @@ pub fn print_trend_table(records: &[ConvergeRecord]) -> Result<()> {
 
     let mut prev: Option<&ConvergeRecord> = None;
     for rec in records {
-        let t = trend_marker(rec.total, prev.map(|p| p.total));
-        let b = trend_marker(rec.behind, prev.map(|p| p.behind));
-        let d = trend_marker(rec.dirty_blocked, prev.map(|p| p.dirty_blocked));
-        let f = trend_marker(rec.fallback, prev.map(|p| p.fallback));
-        let l = trend_marker(rec.lineage_current, prev.map(|p| p.lineage_current));
+        let total_trend = trend_marker(rec.total, prev.map(|p| p.total));
+        let behind_trend = trend_marker(rec.behind, prev.map(|p| p.behind));
+        let dirty_trend = trend_marker(rec.dirty_blocked, prev.map(|p| p.dirty_blocked));
+        let fallback_trend = trend_marker(rec.fallback, prev.map(|p| p.fallback));
+        let lineage_trend = trend_marker(rec.lineage_current, prev.map(|p| p.lineage_current));
 
         println!(
             "{:<22} {:>5}{} {:>6}{} {:>12}{} {:>8}{} {:>15}{}",
             rec.run,
-            rec.total, t,
-            rec.behind, b,
-            rec.dirty_blocked, d,
-            rec.fallback, f,
-            rec.lineage_current, l,
+            rec.total, total_trend,
+            rec.behind, behind_trend,
+            rec.dirty_blocked, dirty_trend,
+            rec.fallback, fallback_trend,
+            rec.lineage_current, lineage_trend,
         );
         prev = Some(rec);
     }
-
-    Ok(())
 }
 
 /// Emit records as a JSON array.

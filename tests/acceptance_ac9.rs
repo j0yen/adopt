@@ -1,4 +1,4 @@
-//! AC9 (MUST): When binstale is on PATH and artifact is a daemon, is_daemon: true.
+//! AC9 (MUST): When binstale is on PATH and artifact is a daemon, `is_daemon`: true.
 //! When binstale is absent, scan still completes.
 
 use std::process::Command;
@@ -42,7 +42,7 @@ fn make_bin_repo_with_systemd_unit(tmp: &TempDir, bin_name: &str) -> std::path::
     repos_dir
 }
 
-/// AC9a: scan completes even with no binstale on PATH.
+/// `AC9a`: scan completes even with no binstale on PATH.
 #[test]
 fn scan_completes_without_binstale() {
     let tmp = TempDir::new().expect("tempdir");
@@ -73,8 +73,8 @@ fn scan_completes_without_binstale() {
         .unwrap_or_else(|e| panic!("JSON: {e}\n{stdout}"));
 }
 
-/// AC9b: artifact backed by systemd unit gets is_daemon: true.
-/// We test this by overriding the XDG_CONFIG_HOME to point to our
+/// `AC9b`: artifact backed by systemd unit gets `is_daemon`: true.
+/// We test this by overriding the `XDG_CONFIG_HOME` to point to our
 /// temp systemd dir.
 #[test]
 fn daemon_artifact_gets_is_daemon_true() {

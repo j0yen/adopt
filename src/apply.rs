@@ -52,7 +52,7 @@ pub enum ApplyOutcome {
         /// Why it failed.
         reason: String,
     },
-    /// Artifact had no rollout needed (fix_cmd is empty).
+    /// Artifact had no rollout needed (`fix_cmd` is empty).
     NoRollout,
     /// Install-prefix contained a literal `~` or resolved outside `$HOME`.
     BadPrefix {
@@ -74,11 +74,11 @@ pub struct ApplyResult {
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
-/// Parses a fix_cmd string into a discrete argv vector.
+/// Parses a `fix_cmd` string into a discrete argv vector.
 ///
 /// Uses whitespace splitting (no shell expansion) so metacharacters in paths
 /// are never interpreted by a shell. Quotes are **not** stripped — callers
-/// should not embed shell-quoting in fix_cmd; they should use raw paths.
+/// should not embed shell-quoting in `fix_cmd`; they should use raw paths.
 fn parse_cmd(cmd: &str) -> Vec<String> {
     cmd.split_whitespace().map(str::to_owned).collect()
 }
@@ -178,7 +178,19 @@ pub fn validate_root(root: &str) -> Result<PathBuf, String> {
 /// Returns an error if the scan itself fails.  Individual install failures are
 /// encoded as `ApplyOutcome::Failed` and the function returns `Ok` with that
 /// result (the caller should inspect `ApplyOutcome::Failed` and exit non-zero).
+//
+// This is a single per-artifact decision tree (daemon vs. non-daemon, dry-run
+// vs. execute, skip vs. reinstall) mirrored 1:1 from the CLI's own flag set;
+// splitting it into smaller functions would scatter the `ApplyResult` push
+// sites without reducing real complexity, and collapsing the four flags into
+// an options struct would just move the count rather than remove it. Scoped
+// allow, same rationale as the `print_stdout` allow already on this fn.
 #[allow(clippy::print_stdout)]
+#[allow(
+    clippy::cognitive_complexity,
+    clippy::too_many_lines,
+    clippy::fn_params_excessive_bools
+)]
 pub fn run_apply(
     dry_run: bool,
     execute: bool,
@@ -350,19 +362,16 @@ pub fn run_apply(
 
         // ── Execute ────────────────────────────────────────────────────────
         // argv[0] is the program; the rest are args. Never pass to sh -c.
-        let (prog, rest) = match argv.split_first() {
-            Some(pair) => pair,
-            None => {
-                output.push(ApplyResult {
-                    bin: artifact.bin.clone(),
-                    verdict: ApplyOutcome::Failed {
-                        reason: "fix_cmd is empty after parse".to_owned(),
-                    },
-                    elapsed_ms: elapsed_ms(start),
-                });
+        let Some((prog, rest)) = argv.split_first() else {
+            output.push(ApplyResult {
+                bin: artifact.bin.clone(),
+                verdict: ApplyOutcome::Failed {
+                    reason: "fix_cmd is empty after parse".to_owned(),
+                },
+                elapsed_ms: elapsed_ms(start),
+            });
 
-                continue;
-            }
+            continue;
         };
 
         let status = Command::new(prog).args(rest).status();
@@ -493,7 +502,7 @@ mod tests {
         let fix_cmd = "cargo install --force --path /tmp/fake --root ~/.local";
         let argv = parse_cmd(fix_cmd);
         let root_idx = argv.iter().position(|a| a == "--root");
-        let root_val = root_idx.and_then(|i| argv.get(i + 1)).map(String::as_str).unwrap_or("");
+        let root_val = root_idx.and_then(|i| argv.get(i + 1)).map_or("", String::as_str);
         let outcome = match validate_root(root_val) {
             Err(reason) => ApplyOutcome::BadPrefix { resolved: reason },
             Ok(_) => ApplyOutcome::InstalledOk,
@@ -516,7 +525,7 @@ mod tests {
 
     fn with_state_home<F: FnOnce(&TempDir)>(f: F) {
         let tmp = TempDir::new().unwrap();
-        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::set_var("XDG_STATE_HOME", tmp.path());
         f(&tmp);
         std::env::remove_var("XDG_STATE_HOME");
@@ -538,7 +547,7 @@ mod tests {
     }
 
     /// AC2: When the stored fingerprint matches the current one, the skip decision
-    /// is AlreadyCurrent.  We test the decision logic directly (not run_apply,
+    /// is `AlreadyCurrent`.  We test the decision logic directly (not `run_apply`,
     /// which requires a real scan + cargo).
     #[test]
     fn ac2_matching_fingerprint_produces_already_current() {
@@ -614,7 +623,7 @@ mod tests {
         });
     }
 
-    /// AC6: AlreadyCurrent is a distinct variant from InstalledCurrent.
+    /// AC6: `AlreadyCurrent` is a distinct variant from `InstalledCurrent`.
     /// Summary counts correctly distinguish them.
     #[test]
     fn ac6_summary_distinguishes_counts() {

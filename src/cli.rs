@@ -90,7 +90,7 @@ enum Command {
         #[arg(long, default_value = "table")]
         format: OutputFormat,
 
-        /// Day threshold for splitting SourceNewer: artifacts with delta >= N days are
+        /// Day threshold for splitting `SourceNewer`: artifacts with delta >= N days are
         /// classified as SourceNewer-behind; those below are SourceNewer-sameday.
         #[arg(long, default_value = "2", value_name = "N")]
         behind_days: i64,
@@ -194,7 +194,7 @@ pub(crate) fn run() -> Result<()> {
                 ReportOutputFormat::Docket => report::ReportFormat::Docket,
                 ReportOutputFormat::Json => report::ReportFormat::Json,
             };
-            report::run_report(report::ReportArgs {
+            report::run_report(&report::ReportArgs {
                 run_id: run,
                 dry_run,
                 from_json,
@@ -202,7 +202,7 @@ pub(crate) fn run() -> Result<()> {
             })?;
         }
         Command::Doctor { clean } => {
-            let any_debris = doctor::run_doctor(clean)?;
+            let any_debris = doctor::run_doctor(clean);
             if any_debris {
                 bail!("adopt doctor: junk debris detected under a literal-tilde prefix");
             }
@@ -212,7 +212,7 @@ pub(crate) fn run() -> Result<()> {
                 OutputFormat::Table => verify::VerifyFormat::Table,
                 OutputFormat::Json => verify::VerifyFormat::Json,
             };
-            let any_not_current = verify::run_verify(verify::VerifyArgs {
+            let any_not_current = verify::run_verify(&verify::VerifyArgs {
                 format: fmt,
                 behind_days,
             })?;
@@ -225,7 +225,7 @@ pub(crate) fn run() -> Result<()> {
             let records = converge::read_records(&ledger, last)?;
 
             match format {
-                OutputFormat::Table => converge::print_trend_table(&records)?,
+                OutputFormat::Table => converge::print_trend_table(&records),
                 OutputFormat::Json => converge::print_trend_json(&records)?,
             }
 

@@ -1,4 +1,4 @@
-//! AC2 (scan_exit_clean): Given a lineage where every artifact is
+//! AC2 (`scan_exit_clean)`: Given a lineage where every artifact is
 //! `installed-current` or `not-a-bin`, when `adopt scan` runs, the process
 //! exits 0.
 //!

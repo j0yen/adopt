@@ -1,4 +1,4 @@
-//! AC1 (scan_exit_actionable): Given a lineage with at least one
+//! AC1 (`scan_exit_actionable)`: Given a lineage with at least one
 //! `not-installed` artifact, when `adopt scan --format json` runs, stdout is
 //! valid JSON listing that verdict and the process exits 1.
 //!

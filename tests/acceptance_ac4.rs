@@ -2,7 +2,7 @@
 //! src/ commit gets verdict `installed-stale`.
 
 use std::process::Command;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
 fn adopt_bin() -> std::path::PathBuf {

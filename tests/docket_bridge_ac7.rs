@@ -1,4 +1,4 @@
-//! AC7 (docket_bridge_live): Given the real `docket` binary installed at
+//! AC7 (`docket_bridge_live)`: Given the real `docket` binary installed at
 //! `~/.local/bin/docket`, when `adopt report --run <fresh-run-id>` runs on
 //! this box, it exits 0 with no clap usage error in output.
 //!

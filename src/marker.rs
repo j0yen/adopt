@@ -92,19 +92,16 @@ pub fn compute_fingerprint(repo_path: &Path) -> Result<SourceFingerprint> {
     }
 
     // Dirty (or git unavailable): use max mtime across src/**, Cargo.toml, Cargo.lock.
-    let max_mtime = max_src_mtime(repo_path)?;
+    let max_mtime = max_src_mtime(repo_path);
     Ok(SourceFingerprint(format!("dirty:{max_mtime}")))
 }
 
 /// Returns the maximum mtime (seconds since epoch) across `src/**`, `Cargo.toml`,
 /// and `Cargo.lock` under `repo_path`.
 ///
-/// Returns 0 if no tracked files exist.
-///
-/// # Errors
-///
-/// Returns an error on I/O failures.
-fn max_src_mtime(repo_path: &Path) -> Result<u64> {
+/// Returns 0 if no tracked files exist. I/O failures on individual entries are
+/// skipped (best-effort scan), never propagated.
+fn max_src_mtime(repo_path: &Path) -> u64 {
     let mut max: u64 = 0;
 
     // Probe Cargo.toml and Cargo.lock directly.
@@ -121,7 +118,7 @@ fn max_src_mtime(repo_path: &Path) -> Result<u64> {
         for entry in walkdir::WalkDir::new(&src_dir)
             .follow_links(false)
             .into_iter()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
         {
             if entry.file_type().is_file() {
                 if let Ok(meta) = entry.metadata() {
@@ -131,7 +128,7 @@ fn max_src_mtime(repo_path: &Path) -> Result<u64> {
         }
     }
 
-    Ok(max)
+    max
 }
 
 /// Extracts seconds-since-epoch from file metadata.
@@ -139,8 +136,7 @@ fn mtime_secs(meta: &std::fs::Metadata) -> u64 {
     meta.modified()
         .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs())
 }
 
 // ── Marker path ───────────────────────────────────────────────────────────────
@@ -154,10 +150,10 @@ fn mtime_secs(meta: &std::fs::Metadata) -> u64 {
 /// Returns an error if `$HOME` is unset and `$XDG_STATE_HOME` is also unset.
 pub fn marker_path(bin: &str) -> Result<PathBuf> {
     let state_home = if let Ok(xdg) = std::env::var("XDG_STATE_HOME") {
-        if !xdg.is_empty() {
-            PathBuf::from(xdg)
-        } else {
+        if xdg.is_empty() {
             default_state_home()?
+        } else {
+            PathBuf::from(xdg)
         }
     } else {
         default_state_home()?
@@ -238,7 +234,7 @@ mod tests {
     /// Run `f` while holding the process-wide env lock and with `XDG_STATE_HOME` set to `tmp`.
     fn with_state_home<F: FnOnce(&TempDir)>(f: F) {
         let tmp = TempDir::new().unwrap();
-        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::set_var("XDG_STATE_HOME", tmp.path());
         f(&tmp);
         std::env::remove_var("XDG_STATE_HOME");
@@ -265,7 +261,7 @@ mod tests {
         });
     }
 
-    /// AC7: marker_path respects $XDG_STATE_HOME.
+    /// AC7: `marker_path` respects $`XDG_STATE_HOME`.
     #[test]
     fn marker_path_honors_xdg_state_home() {
         with_state_home(|tmp| {
