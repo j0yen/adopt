@@ -1,0 +1,2 @@
+# Config for the rustbuild extended-gates producers (Stage 4).
+prd_path = "PRD-adopt-exit-code-and-docket-bridge.md"
