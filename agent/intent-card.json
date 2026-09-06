@@ -1,7 +1,8 @@
 {
   "schema": "autobuilder.intent_card.v1",
-  "prd_source": "/home/jsy/wintermute/autobuilder/PRD-adopt-scan.md",
-  "root_motivation": "Automated /build ships binaries but the adoption step (cargo install → PATH) never runs and nothing verifies it. Tools sit uninstalled for days. The root gap is structural: binstale can only check a running process, so an artifact that was never installed is invisible to all existing detectors. adopt scan fills that gap with a read-only probe that answers, per shipped artifact, whether it was actually adopted and if not, what exact command to run.",
+  "prd_source": "/home/jsy/Documents/PRDs/build-queue/PRD-adopt-exit-code-and-docket-bridge.md",
+  "intent_slug": "adopt-exit-code-and-docket-bridge",
+  "root_motivation": "The self-review skill's `adopt_scan_probe` playbook branches on `adopt scan`'s exit code: 0 means \"all artifacts current\", 1 means \"at least one not-installed or installed-stale\". The Scan arm in `src/cli.rs:160-165` prints results and returns `Ok(())` unconditionally, unlike the Apply (`cli.rs:174-182`) and Verify (`cli.rs:207-213`) arms, which `bail!()` on actionable items. The 2026-09-04 self-review observed exit 0 alongside 22 `not-installed` verdicts; the 2026-08-31 review logged the same anomaly.",
   "user_persona": "Joe Yen on the wintermute laptop, running daily self-review and /build automation. Needs a machine-readable verdict + copy-pasteable fix per artifact so downstream tools (adopt-apply, docket-report) can consume it.",
   "unfakeable_metric": {
     "name": "acceptance_tests_passing_count",
@@ -13,62 +14,44 @@
     {
       "id": "AC1",
       "level": "MUST",
-      "description": "`adopt scan --format json` emits a JSON array; each element has at minimum `repo`, `bin`, `verdict`, `is_daemon`, and `fix_cmd` keys.",
+      "description": "scan_exit_actionable: Given a lineage with at least one `not-installed` artifact, When `adopt scan --format json` runs, Then stdout is valid JSON listing that verdict And the process exits 1.",
       "test": "tests/acceptance_ac1.rs"
     },
     {
       "id": "AC2",
       "level": "MUST",
-      "description": "A wintermute repo declaring a [[bin]] whose binary is absent from PATH/~/.local/bin/~/.cargo/bin gets verdict `not-installed` and fix_cmd `cargo install --path <repo> --root ~/.local`.",
+      "description": "scan_exit_clean: Given a lineage where every artifact is `installed-current` or `not-a-bin`, When `adopt scan` runs, Then the process exits 0.",
       "test": "tests/acceptance_ac2.rs"
     },
     {
       "id": "AC3",
       "level": "MUST",
-      "description": "A binary present on PATH whose installed mtime is newer than the repo's newest src/ commit gets verdict `installed-current`.",
+      "description": "scan_exit_stale: Given a lineage with at least one `installed-stale` artifact and zero `not-installed`, When `adopt scan` runs, Then the process exits 1.",
       "test": "tests/acceptance_ac3.rs"
     },
     {
       "id": "AC4",
-      "level": "MUST",
-      "description": "A binary present on PATH whose installed mtime is older than the repo's newest src/ commit gets verdict `installed-stale`.",
+      "level": "SHOULD",
+      "description": "scan_exit_match_filter: Given one `not-installed` artifact named `foo` and the rest current, When `adopt scan --match 'bar*'` runs, Then the process exits 0.",
       "test": "tests/acceptance_ac4.rs"
     },
     {
       "id": "AC5",
       "level": "MUST",
-      "description": "A library-only repo (no [[bin]], no default-run) is reported `not-a-bin` and excluded from default output (shown only with --all).",
+      "description": "docket_bridge_resolve_argv: Given a stub `docket` binary on PATH that records its argv, When `adopt report` resolves a finding with slug `wm-node`, Then the stub receives exactly `resolve wm-node` (plus `--reason <text>` if and only if a reason is passed) and no `--run` or `--key` token.",
       "test": "tests/acceptance_ac5.rs"
     },
     {
       "id": "AC6",
-      "level": "MUST",
-      "description": "An unreadable manifest, malformed Cargo.toml, or missing repo dir is skipped without aborting (exit 0, other artifacts still reported).",
+      "level": "SHOULD",
+      "description": "docket_bridge_error_log: Given a stub `docket` that exits 2 on any argv, When `adopt report` runs, Then stderr contains the full argv adopt attempted before the exit-status line.",
       "test": "tests/acceptance_ac6.rs"
     },
     {
       "id": "AC7",
-      "level": "MUST",
-      "description": "`adopt scan --format json | head -1` does not panic with SIGPIPE/BrokenPipe.",
+      "level": "MAY",
+      "description": "docket_bridge_live: Given the real `docket` binary installed at ~/.local/bin/docket, When `adopt report --run <fresh-run-id>` runs on this box, Then it exits 0 with no clap usage error in output.",
       "test": "tests/acceptance_ac7.rs"
-    },
-    {
-      "id": "AC8",
-      "level": "MUST",
-      "description": "`adopt scan --match '^wm-'` restricts output to artifacts whose bin name starts with `wm-`.",
-      "test": "tests/acceptance_ac8.rs"
-    },
-    {
-      "id": "AC9",
-      "level": "MUST",
-      "description": "When artifact is backed by a systemd user unit, is_daemon: true; when binstale absent, scan completes without error.",
-      "test": "tests/acceptance_ac9.rs"
-    },
-    {
-      "id": "AC10",
-      "level": "MUST",
-      "description": "`adopt --version` and `adopt --help` exit 0.",
-      "test": "tests/acceptance_ac10.rs"
     }
   ],
   "scope": [
@@ -110,7 +93,7 @@
     {
       "why": 2,
       "q": "Why does no existing tool catch this?",
-      "a": "binstale operates on running process PIDs — it can't flag a binary that was never installed and therefore never runs. vigil/binstale cover stale daemons; nothing covers never-installed CLIs."
+      "a": "binstale operates on running process PIDs \u2014 it can't flag a binary that was never installed and therefore never runs. vigil/binstale cover stale daemons; nothing covers never-installed CLIs."
     },
     {
       "why": 3,
@@ -120,7 +103,7 @@
     {
       "why": 4,
       "q": "Why does that matter?",
-      "a": "rollout — the tool whose job is adopting fleet binaries — is itself not installed (rollout absent from PATH for 9 days), meaning the fix for fleet staleness is itself the most obvious example of the problem."
+      "a": "rollout \u2014 the tool whose job is adopting fleet binaries \u2014 is itself not installed (rollout absent from PATH for 9 days), meaning the fix for fleet staleness is itself the most obvious example of the problem."
     },
     {
       "why": 5,
@@ -128,6 +111,17 @@
       "a": "The problem is structural: there are many wintermute repos and no single command shows which need adoption. The detector must exist before the fixer can be wired into automation."
     }
   ],
+  "created_at": "2026-06-13T00:00:00Z",
+  "carried_forward": {
+    "user_persona": true,
+    "unfakeable_metric": true,
+    "scope": true,
+    "non_goals": true,
+    "hard_constraints": true,
+    "five_whys_trace": true,
+    "created_at": true,
+    "ambiguities_resolved": true
+  },
   "ambiguities_resolved": [
     {
       "question": "Should adopt scan check live running processes for staleness?",
@@ -137,7 +131,5 @@
       "question": "What is the install root convention on this laptop?",
       "resolution": "~/.local/bin (cargo install --root ~/.local). ~/.cargo/bin is also checked but not the primary fix target."
     }
-  ],
-  "created_at": "2026-06-13T00:00:00Z",
-  "intent_slug": "adopt-scan"
+  ]
 }
