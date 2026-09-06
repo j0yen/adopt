@@ -612,8 +612,8 @@ mod tests {
         let head_hash = init_git_repo(repo_dir.path());
 
         // Write a marker whose fingerprint IS the HEAD hash.
-        let fp = SourceFingerprint(head_hash.clone());
-        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let fp = SourceFingerprint(head_hash);
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
         write_marker("ac1-testbin", &repo_dir.path().to_string_lossy(), &fp, "install")
             .expect("write_marker");
@@ -657,7 +657,7 @@ mod tests {
 
         // Write a marker with a DIFFERENT (old) fingerprint.
         let old_fp = SourceFingerprint(format!("old-{head_hash}"));
-        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
         write_marker("ac2-testbin", &repo_dir.path().to_string_lossy(), &old_fp, "install")
             .expect("write_marker");
@@ -682,7 +682,7 @@ mod tests {
 
     // ── AC3: no marker → byte-for-byte existing clock behavior ───────────────
 
-    /// AC3a: No marker, installed_ts < src_ts → InstalledStale (ClockFallback).
+    /// `AC3a`: No marker, `installed_ts` < `src_ts` → `InstalledStale` (`ClockFallback`).
     #[test]
     fn ac3a_no_marker_clock_stale() {
         use tempfile::TempDir;
@@ -695,7 +695,7 @@ mod tests {
         std::fs::write(&fake_bin, "").expect("write fake bin");
 
         // No marker written — XDG_STATE_HOME points to empty dir.
-        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
 
         let (verdict, basis) = derive_verdict(
@@ -713,7 +713,7 @@ mod tests {
         assert_eq!(basis, crate::types::FreshnessBasis::ClockFallback);
     }
 
-    /// AC3b: No marker, installed_ts >= src_ts → InstalledCurrent (ClockFallback).
+    /// `AC3b`: No marker, `installed_ts` >= `src_ts` → `InstalledCurrent` (`ClockFallback`).
     #[test]
     fn ac3b_no_marker_clock_current() {
         use tempfile::TempDir;
@@ -725,7 +725,7 @@ mod tests {
         let fake_bin = state_dir.path().join("ac3b-bin");
         std::fs::write(&fake_bin, "").expect("write fake bin");
 
-        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
 
         let (verdict, basis) = derive_verdict(
@@ -764,7 +764,7 @@ mod tests {
 
         // Marker fingerprint = committed HEAD (binary was built from that commit).
         let fp = SourceFingerprint(head_hash.clone());
-        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
         write_marker("ac4-testbin", &repo_dir.path().to_string_lossy(), &fp, "install")
             .expect("write_marker");
@@ -793,8 +793,8 @@ mod tests {
 
     // ── AC6: write_marker → derive_verdict round-trip ─────────────────────────
 
-    /// AC6: A marker written via the apply path (write_marker) and then read
-    /// by derive_verdict produces `InstalledCurrent` with no reinstall.
+    /// AC6: A marker written via the apply path (`write_marker`) and then read
+    /// by `derive_verdict` produces `InstalledCurrent` with no reinstall.
     /// This confirms the same fingerprint function is used on both sides.
     #[test]
     fn ac6_apply_write_scan_read_roundtrip() {
@@ -808,7 +808,7 @@ mod tests {
         // Compute fingerprint the same way apply does.
         let fp = compute_fingerprint(repo_dir.path()).expect("compute_fingerprint");
 
-        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
         write_marker("ac6-testbin", &repo_dir.path().to_string_lossy(), &fp, "install")
             .expect("write_marker");

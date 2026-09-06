@@ -8,7 +8,7 @@ use adopt::types::{ArtifactResult, FreshnessBasis, Verdict};
 use std::env;
 use tempfile::TempDir;
 
-/// Build a fake ArtifactResult that is a daemon, not-installed.
+/// Build a fake `ArtifactResult` that is a daemon, not-installed.
 fn daemon_artifact(bin: &str, repo: &str) -> ArtifactResult {
     ArtifactResult {
         repo: repo.to_owned(),
@@ -24,7 +24,7 @@ fn daemon_artifact(bin: &str, repo: &str) -> ArtifactResult {
     }
 }
 
-/// AC4: default --with-daemons=false → SkippedDaemon outcome with a note.
+/// AC4: default --with-daemons=false → `SkippedDaemon` outcome with a note.
 #[test]
 fn daemon_skipped_by_default() {
     // Point to empty wintermute dir to avoid real scan pollution.
@@ -54,7 +54,7 @@ fn daemon_skipped_by_default() {
     }
 }
 
-/// AC5: with_daemons=true but rollout not on PATH → SkippedDaemonsNotRequested.
+/// AC5: `with_daemons=true` but rollout not on PATH → `SkippedDaemonsNotRequested`.
 #[test]
 fn daemon_skipped_when_rollout_absent() {
     // We can't guarantee rollout is absent in the test environment, but we can
@@ -64,7 +64,7 @@ fn daemon_skipped_when_rollout_absent() {
     assert_ne!(outcome, ApplyOutcome::InstalledOk);
 }
 
-/// Integration: run_apply with daemons flag in empty env returns cleanly.
+/// Integration: `run_apply` with daemons flag in empty env returns cleanly.
 #[test]
 fn run_apply_with_daemons_empty_env() {
     let tmp = TempDir::new().expect("tempdir");

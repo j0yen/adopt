@@ -5,11 +5,11 @@ use adopt::apply::run_apply;
 use std::env;
 use tempfile::TempDir;
 
-/// Verify that a fix_cmd containing metacharacters is never passed to sh -c.
+/// Verify that a `fix_cmd` containing metacharacters is never passed to sh -c.
 /// We create a fake repo whose path contains shell metacharacters and verify
-/// run_apply doesn't panic or error on the parse step (structural guard).
+/// `run_apply` doesn't panic or error on the parse step (structural guard).
 ///
-/// The real guard is in parse_cmd which uses split_whitespace, not sh -c.
+/// The real guard is in `parse_cmd` which uses `split_whitespace`, not sh -c.
 #[test]
 fn metachar_in_path_does_not_shell_expand() {
     // Point to empty wintermute dir — we can't easily inject a malicious artifact
@@ -22,7 +22,7 @@ fn metachar_in_path_does_not_shell_expand() {
     assert!(result.is_ok(), "run_apply should not error: {result:?}");
 }
 
-/// Unit test: parse_cmd does not shell-expand a semicolon.
+/// Unit test: `parse_cmd` does not shell-expand a semicolon.
 #[test]
 fn parse_cmd_preserves_semicolon_literally() {
     // Can't call parse_cmd directly (private), but we can verify via the module tests.

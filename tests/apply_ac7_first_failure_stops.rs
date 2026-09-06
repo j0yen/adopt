@@ -4,20 +4,17 @@ use adopt::apply::ApplyOutcome;
 
 /// Structural: verify that once a Failed outcome is emitted, no subsequent
 /// outcomes appear in the results vec.  We test this via the logic contract
-/// documented in run_apply: the loop breaks on `failed = true`.
+/// documented in `run_apply`: the loop breaks on `failed = true`.
 ///
 /// Since we can't easily inject failing artifacts without a live cargo environment,
 /// we test the outcome enum semantics and the Vec contract.
 #[test]
 fn failed_outcome_is_terminal() {
     // Simulate what run_apply produces when a failure occurs at position 1:
-    let outcomes = vec![
-        ApplyOutcome::InstalledOk,   // first artifact ok
+    let outcomes = [ApplyOutcome::InstalledOk,   // first artifact ok
         ApplyOutcome::Failed {       // second fails
             reason: "install exited 1".to_owned(),
-        },
-        // nothing after this — run stopped
-    ];
+        }];
 
     let failed_pos = outcomes
         .iter()

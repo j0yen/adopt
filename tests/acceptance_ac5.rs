@@ -42,7 +42,7 @@ fn library_only_excluded_from_default_output() {
     let arr: Vec<serde_json::Value> = serde_json::from_str(&stdout)
         .unwrap_or_else(|e| panic!("JSON: {e}\n{stdout}"));
 
-    let found = arr.iter().any(|e| e["bin"].as_str() == Some(name) || e["repo"].as_str().map_or(false, |r| r.contains(name)));
+    let found = arr.iter().any(|e| e["bin"].as_str() == Some(name) || e["repo"].as_str().is_some_and(|r| r.contains(name)));
     assert!(!found, "library-only repo {name} should not appear in default scan output");
 }
 
@@ -65,7 +65,7 @@ fn library_only_shown_with_all_flag() {
 
     // Find the entry for the lib repo.
     let entry = arr.iter().find(|e| {
-        e["repo"].as_str().map_or(false, |r| r.contains(name))
+        e["repo"].as_str().is_some_and(|r| r.contains(name))
     });
     let entry = entry.unwrap_or_else(|| panic!("{name} not found in --all output:\n{stdout}"));
     assert_eq!(entry["verdict"].as_str(), Some("not-a-bin"), "expected not-a-bin, got: {}", entry["verdict"]);

@@ -1,4 +1,4 @@
-//! AC4 (scan_exit_match_filter): Given one `not-installed` artifact named
+//! AC4 (`scan_exit_match_filter)`: Given one `not-installed` artifact named
 //! `foo` and the rest current, when `adopt scan --match 'bar*'` runs (which
 //! excludes `foo`), the process exits 0 — the exit code reflects only the
 //! artifacts that survive the filter.

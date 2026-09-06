@@ -1,4 +1,4 @@
-//! AC1: append_record is idempotent per run id.
+//! AC1: `append_record` is idempotent per run id.
 //!
 //! Appending the same run id twice must not produce a duplicate JSONL line.
 

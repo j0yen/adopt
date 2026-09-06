@@ -1,4 +1,4 @@
-//! AC6 (docket_bridge_error_log): Given a stub `docket` that exits 2 on any
+//! AC6 (`docket_bridge_error_log)`: Given a stub `docket` that exits 2 on any
 //! argv, when `adopt report` runs, stderr contains the full argv adopt
 //! attempted before the exit-status line — so the next CLI drift is
 //! diagnosable from the error message alone.

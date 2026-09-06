@@ -1,6 +1,6 @@
 //! AC2 (MUST): A wintermute repo declaring a `[[bin]]` whose binary is absent
 //! from PATH/~/.local/bin/~/.cargo/bin gets verdict `not-installed` and
-//! fix_cmd of the form `cargo install --path <repo> --root ~/.local`.
+//! `fix_cmd` of the form `cargo install --path <repo> --root ~/.local`.
 
 use std::process::Command;
 use tempfile::TempDir;

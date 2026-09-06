@@ -39,7 +39,7 @@ pub enum StaleReason {
 impl StaleReason {
     /// Returns the stable docket slug for this reason.
     #[must_use]
-    pub fn docket_slug(&self) -> &'static str {
+    pub const fn docket_slug(&self) -> &'static str {
         match self {
             Self::NeverInstalled => "adopt-stale-neverinstalled",
             Self::WrongPrefix => "adopt-stale-wrongprefix",
@@ -51,9 +51,9 @@ impl StaleReason {
         }
     }
 
-    /// Returns a display name for summary output (kebab-case for SourceNewer variants).
+    /// Returns a display name for summary output (kebab-case for `SourceNewer` variants).
     #[must_use]
-    pub fn display_name(&self) -> &'static str {
+    pub const fn display_name(&self) -> &'static str {
         match self {
             Self::NeverInstalled => "NeverInstalled",
             Self::WrongPrefix => "WrongPrefix",
@@ -291,7 +291,7 @@ pub type AnyNotCurrent = bool;
 ///
 /// # Errors
 /// Returns an error if the scan fails.
-pub fn run_verify(args: VerifyArgs) -> Result<AnyNotCurrent> {
+pub fn run_verify(args: &VerifyArgs) -> Result<AnyNotCurrent> {
     let results = scan::run_scan(true, None)?;
     let behind_days = args.behind_days;
 
@@ -702,7 +702,7 @@ mod tests {
             StaleReason::BuildFail,
             StaleReason::SmokeFail,
         ];
-        let slugs: Vec<&'static str> = reasons.iter().map(|r| r.docket_slug()).collect();
+        let slugs: Vec<&'static str> = reasons.iter().map(super::StaleReason::docket_slug).collect();
         let unique: std::collections::HashSet<&&str> = slugs.iter().collect();
         assert_eq!(unique.len(), slugs.len(), "docket slugs must all be distinct");
     }

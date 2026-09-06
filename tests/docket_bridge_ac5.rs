@@ -1,4 +1,4 @@
-//! AC5 (docket_bridge_resolve_argv): Given a stub `docket` binary on PATH
+//! AC5 (`docket_bridge_resolve_argv)`: Given a stub `docket` binary on PATH
 //! that records its argv, when `adopt report` resolves a finding, the stub
 //! receives exactly `resolve <slug>` (plus `--reason <text>` iff a reason is
 //! passed) and no `--run` or `--key` token — matching docket's real

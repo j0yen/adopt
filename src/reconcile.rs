@@ -312,15 +312,12 @@ fn reconcile_one(repo: &Path, bin: &str, dry_run: bool, include_dirty: bool) -> 
     // binary was built from.  If `include_dirty` is on, we seed from committed HEAD
     // (the binary was built from HEAD even if someone later edited the tree).
     // If `include_dirty` is off, classify as DirtyBlocked rather than silently skip.
-    if dirty {
-        if !include_dirty {
-            return ReconcileResult {
-                repo: repo.display().to_string(),
-                bin: bin.to_owned(),
-                outcome: ReconcileOutcome::DirtyBlocked,
-            };
-        }
-        // include_dirty=true: fall through and seed from committed HEAD.
+    if dirty && !include_dirty {
+        return ReconcileResult {
+            repo: repo.display().to_string(),
+            bin: bin.to_owned(),
+            outcome: ReconcileOutcome::DirtyBlocked,
+        };
     }
 
     // Mint the marker.
@@ -368,10 +365,7 @@ pub fn print_reconcile_results(results: &[ReconcileResult], dry_run: bool) {
                     bin = r.bin, repo = r.repo);
                 seeded += 1;
             }
-            ReconcileOutcome::AlreadyMarked => {
-                skipped += 1;
-            }
-            ReconcileOutcome::NotInstalled => {
+            ReconcileOutcome::AlreadyMarked | ReconcileOutcome::NotInstalled => {
                 skipped += 1;
             }
             ReconcileOutcome::DirtyTree => {
@@ -410,12 +404,12 @@ mod tests {
     use std::process::Command;
     use tempfile::TempDir;
 
-    /// Sets XDG_STATE_HOME + WM_WINTERMUTE_DIR and runs `f`.
+    /// Sets `XDG_STATE_HOME` + `WM_WINTERMUTE_DIR` and runs `f`.
     ///
     /// Uses `catch_unwind` to ensure env var cleanup happens even if `f` panics,
     /// preventing poisoned-lock env var leakage from affecting subsequent tests.
     fn with_env<F: FnOnce()>(state_dir: &TempDir, wm_dir: &TempDir, f: F) {
-        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::set_var("XDG_STATE_HOME", state_dir.path());
         std::env::set_var("WM_WINTERMUTE_DIR", wm_dir.path());
         // Point HOME to a temp dir so local_bin() / cargo_bin() don't hit live dirs.
