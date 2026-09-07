@@ -112,16 +112,6 @@
     }
   ],
   "created_at": "2026-06-13T00:00:00Z",
-  "carried_forward": {
-    "user_persona": true,
-    "unfakeable_metric": true,
-    "scope": true,
-    "non_goals": true,
-    "hard_constraints": true,
-    "five_whys_trace": true,
-    "created_at": true,
-    "ambiguities_resolved": true
-  },
   "ambiguities_resolved": [
     {
       "question": "Should adopt scan check live running processes for staleness?",
